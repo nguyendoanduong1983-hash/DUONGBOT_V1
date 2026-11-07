@@ -19,6 +19,19 @@ Purpose-built ESP32-S3 firmware for one expressive, camera-equipped desktop robo
 
 ---
 
+> [!IMPORTANT]
+> ### 📌 NGUỒN GỐC DỰ ÁN & GHI NHẬN TÁC GIẢ (CREDITS & ATTRIBUTION)
+> Dự án **DUONGBOT AI** được kế thừa, học hỏi và phát triển mở rộng từ dự án mã nguồn mở:
+> - **Dự án robot gốc (Original Desk Robot Project):** 👉 **[https://github.com/hudrucan/xiaozhi-desk-robot](https://github.com/hudrucan/xiaozhi-desk-robot)** của tác giả **[hudrucan](https://github.com/hudrucan)**
+> - **Nền tảng âm thanh & giao thức AI (Voice Base):** [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32)
+> - **Companion Backend Server:** [`hudrucan/xiaozhi-desk-robot-server`](https://github.com/hudrucan/xiaozhi-desk-robot-server)
+> 
+> *Toàn bộ nền tảng kiến trúc điều khiển robot, biểu cảm gương mặt và hệ thống cốt lõi ban đầu được kế thừa từ tác giả **hudrucan**. Bản DuongBot AI được tùy biến, tối ưu cho phần cứng ESP32-S3-N16R8-CAM, bổ sung đánh thức tiếng Việt "Hi Telly", nghe nhạc YouTube/Radio trực tuyến, cảm biến an toàn ToF và công cụ Web Flasher trực tuyến.*
+>
+> **Chân thành cảm ơn tác giả hudrucan và cộng đồng mã nguồn mở!**
+
+---
+
 This project is built and developed based on [`hudrucan/xiaozhi-desk-robot`](https://github.com/hudrucan/xiaozhi-desk-robot) and [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32), customized and trimmed to a single physical target:
 
 ```text
