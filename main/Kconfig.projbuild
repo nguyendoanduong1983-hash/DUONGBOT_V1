@@ -1,0 +1,216 @@
+menu "DuongBot Firmware"
+
+config OTA_URL
+    string "Default OTA URL"
+    default "https://api.tenclass.net/xiaozhi/ota/"
+    help
+        The application will access this URL to retrieve activation and server connection configuration.
+
+choice
+    prompt "Flash Assets"
+    default FLASH_DEFAULT_ASSETS
+    help
+        Select the assets to flash.
+
+    config FLASH_NONE_ASSETS
+        bool "Do not flash assets"
+    config FLASH_DEFAULT_ASSETS
+        bool "Flash Default Assets"
+    config FLASH_CUSTOM_ASSETS
+        bool "Flash Custom Assets"
+endchoice
+
+config CUSTOM_ASSETS_FILE
+    depends on FLASH_CUSTOM_ASSETS
+    string "Custom Assets File"
+    default "assets.bin"
+    help
+        The custom assets file to flash.
+        It can be a local file relative to the project directory or a remote url.
+
+choice
+    prompt "Default Language"
+    default LANGUAGE_VI_VN
+    help
+        Select device display language
+
+    config LANGUAGE_EN_US
+        bool "English"
+    config LANGUAGE_VI_VN
+        bool "Vietnamese"
+endchoice
+
+choice WAKE_WORD_TYPE
+    prompt "Wake Word Implementation Type"
+    default USE_AFE_WAKE_WORD if IDF_TARGET_ESP32S3 && SPIRAM
+    default WAKE_WORD_DISABLED
+    help
+        Choose the type of wake word implementation to use
+
+    config WAKE_WORD_DISABLED
+        bool "Disabled"
+        help
+            Disable wake word detection
+
+    config USE_AFE_WAKE_WORD
+        bool "Wakenet model with AFE"
+        depends on IDF_TARGET_ESP32S3 && SPIRAM
+        help
+            Support AEC if available. Requires ESP32-S3 with PSRAM.
+
+    config USE_CUSTOM_WAKE_WORD
+        bool "Multinet model (Custom Wake Word)"
+        depends on IDF_TARGET_ESP32S3 && SPIRAM
+        help
+            Requires ESP32-S3 with PSRAM.
+
+endchoice
+
+config CUSTOM_WAKE_WORD
+    string "Custom Wake Word"
+    default "xiao tu dou"
+    depends on USE_CUSTOM_WAKE_WORD
+    help
+        Custom Wake Word, use pinyin for Chinese, separated by spaces
+
+config CUSTOM_WAKE_WORD_DISPLAY
+    string "Custom Wake Word Display"
+    default "小土豆"
+    depends on USE_CUSTOM_WAKE_WORD
+    help
+        Greeting sent to the server after wake word detection
+
+config CUSTOM_WAKE_WORD_THRESHOLD
+    int "Custom Wake Word Threshold (%)"
+    default 20
+    range 1 99
+    depends on USE_CUSTOM_WAKE_WORD
+    help
+        Custom Wake Word Threshold, range 1-99, the smaller the more sensitive, default 20
+
+config AFE_WAKE_WORD_THRESHOLD
+    int "WakeNet Wake Word Threshold (%)"
+    default 55
+    range 40 99
+    depends on USE_AFE_WAKE_WORD
+    help
+        WakeNet detection threshold, range 40-99. Lower values are more sensitive
+        and may increase false detections. Default 55.
+
+config SEND_WAKE_WORD_DATA
+    bool "Send Wake Word Data"
+    default y
+    depends on USE_AFE_WAKE_WORD || USE_CUSTOM_WAKE_WORD
+    help
+        Send wake word data to the server as the first message of the conversation and wait for response
+
+config WAKE_WORD_DETECTION_IN_LISTENING
+    bool "Enable Wake Word Detection in Listening Mode"
+    default n
+    depends on USE_AFE_WAKE_WORD || USE_CUSTOM_WAKE_WORD
+    help
+        Enable wake word detection while in listening mode.
+        When enabled, the device can detect wake word during listening,
+        which allows interrupting the current conversation.
+        When disabled (default), wake word detection is turned off during listening.
+
+config USE_AUDIO_PROCESSOR
+    bool "Enable AFE Audio Processing"
+    default y
+    depends on IDF_TARGET_ESP32S3 && SPIRAM
+    help
+        Enable the shared AFE uplink path with AEC, VAD, configurable NSNet2
+        noise suppression, and automatic gain control.
+        Requires ESP32-S3 with PSRAM.
+
+config USE_SERVER_AEC
+    bool "Enable Server-Side AEC (Unstable)"
+    default n
+    depends on USE_AUDIO_PROCESSOR
+    help
+        To work perperly, server-side AEC requires server support
+
+menu "Camera Configuration"
+    comment "Warning: Please read the help text before modifying these settings."
+
+    config XIAOZHI_CAMERA_MIRROR_CONFIGURED
+        bool "Override camera mirror settings"
+        default n
+        help
+            When enabled, the common camera implementations apply the
+            horizontal and vertical mirror settings below after the sensor has
+            been initialized. Parameterized builds enable this automatically
+            when either mirror setting is configured.
+
+    config XIAOZHI_CAMERA_HMIRROR
+        bool "Mirror Camera Horizontally"
+        default n
+        depends on XIAOZHI_CAMERA_MIRROR_CONFIGURED
+        help
+            Flip the captured camera image across the vertical axis.
+
+    config XIAOZHI_CAMERA_VFLIP
+        bool "Mirror Camera Vertically"
+        default n
+        depends on XIAOZHI_CAMERA_MIRROR_CONFIGURED
+        help
+            Flip the captured camera image across the horizontal axis.
+
+    config XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
+        bool "Allow JPEG Input"
+        default n
+        help
+            Allow JPEG Input format for the camera.
+
+            This option may need to be enabled when using a USB camera.
+
+            Not currently supported when used simultaneously with XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE.
+
+    config XIAOZHI_ENABLE_CAMERA_DEBUG_MODE
+        bool "Enable Camera Debug Mode"
+        default n
+        help
+            Enable camera debug mode, print camera debug information to the console.
+            Only works on boards that support camera.
+
+    config XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP
+        bool "Enable software camera buffer endianness swapping"
+        default n
+        depends on !CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER
+        help
+            This option treats the camera buffer as a uint16_t[] array and performs byte-swapping (endianness conversion) on each element.
+
+            Should only be modified by development board integration engineers.
+
+            **Incorrect usage may result in incorrect image colors!**
+
+            ATTENTION: If the option CAMERA_SENSOR_SWAP_PIXEL_BYTE_ORDER is available for your sensor, please use that instead.
+
+    menuconfig XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+        bool "Enable Camera Image Rotation"
+        default n
+        depends on !XIAOZHI_CAMERA_ALLOW_JPEG_INPUT
+        help
+            Enable camera image rotation, rotate the camera image to the correct orientation.
+            Rotation is done in software with a performance cost.
+            - For 180° rotation, use HFlip + VFlip instead of this option.
+
+            Not currently supported when used simultaneously with XIAOZHI_CAMERA_ALLOW_JPEG_INPUT.
+
+    if XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
+        choice XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE
+            prompt "Camera Image Rotation Angle (clockwise)"
+            default XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_90
+            help
+                Camera image rotation angle.
+            config XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_90
+                bool "90°"
+            config XIAOZHI_CAMERA_IMAGE_ROTATION_ANGLE_270
+                bool "270°"
+            comment "For 180° rotation, use HFlip + VFlip instead of this option"
+        endchoice
+    endif
+endmenu
+
+
+endmenu

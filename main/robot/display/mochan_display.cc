@@ -1,0 +1,1198 @@
+#include "mochan_display.h"
+
+#include "desk_mode_view.h"
+#include "display/vietnamese_glyph_fallback.h"
+#include "display/lvgl_display/lvgl_theme.h"
+#include "src/misc/cache/instance/lv_image_cache.h"
+
+#include <esp_err.h>
+#include <esp_heap_caps.h>
+#include <esp_log.h>
+#include <esp_random.h>
+#include <material_symbols.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <ctime>
+
+LV_FONT_DECLARE(font_noto_sans_basic_16_4);
+extern const lv_font_t mochan_response_font_16;
+
+namespace {
+const lv_color_t kFaceBackground = LV_COLOR_MAKE(0x00, 0x00, 0x00);
+const lv_color_t kBrass = LV_COLOR_MAKE(0xc6, 0xa1, 0x5b);
+const lv_color_t kBrassHighlight = LV_COLOR_MAKE(0xe3, 0xc2, 0x7b);
+const lv_color_t kEyelidShadow = LV_COLOR_MAKE(0x72, 0x55, 0x2b);
+const lv_color_t kSpinnerTrack = LV_COLOR_MAKE(0x4b, 0x3b, 0x25);
+constexpr int kPreviewDurationMs = 5000;
+constexpr int kNotificationTextScale = 210;
+// Keep full-face animation curves together for hardware iteration. AmbientBehavior owns cadence.
+constexpr int kFaceAnimationPeriodMs = 33;
+constexpr int kFaceLayoutTransitionMs = 450;
+constexpr int kEmotionLayoutTransitionMs = 200;
+constexpr int kResponseBoxFadeMs = 200;
+constexpr int kResponseFadeInStartFaceProgress = 144;
+constexpr int kFaceReturnStartResponseProgress = 96;
+constexpr int64_t kPerformanceLogIntervalUs = 5000000;
+constexpr int kYawnOpenMs = 500;
+constexpr int kYawnHoldMs = 350;
+constexpr int kYawnCloseMs = 500;
+constexpr int kYawnSettleMs = 250;
+constexpr char kTag[] = "MochanDisplay";
+
+int RandomRange(int minimum, int maximum) {
+    return minimum + static_cast<int>(esp_random() % (maximum - minimum + 1));
+}
+
+int16_t InterpolateMouthAmount(int64_t elapsed, int64_t from_ms, int64_t to_ms,
+                               int from, int to) {
+    if (elapsed <= from_ms) {
+        return static_cast<int16_t>(from);
+    }
+    if (elapsed >= to_ms) {
+        return static_cast<int16_t>(to);
+    }
+    return static_cast<int16_t>(from +
+                                (to - from) * (elapsed - from_ms) /
+                                    std::max<int64_t>(1, to_ms - from_ms));
+}
+
+uint16_t TimedProgress(uint16_t from, uint16_t target, int64_t started_us, int duration_ms,
+                       int64_t now_us) {
+    const int distance = std::abs(static_cast<int>(target) - static_cast<int>(from));
+    if (distance == 0) {
+        return target;
+    }
+    const int64_t duration_us =
+        std::max<int64_t>(1, static_cast<int64_t>(duration_ms) * 1000 * distance / 256);
+    const int64_t elapsed_us = std::clamp<int64_t>(now_us - started_us, 0, duration_us);
+    const int progress =
+        static_cast<int>(from) +
+        (static_cast<int>(target) - static_cast<int>(from)) * elapsed_us / duration_us;
+    return static_cast<uint16_t>(std::clamp(progress, 0, 256));
+}
+
+int TimedValue(int from, int target, int64_t started_us, int duration_ms, int64_t now_us) {
+    if (from == target) {
+        return target;
+    }
+    const int64_t duration_us = static_cast<int64_t>(duration_ms) * 1000;
+    const int64_t elapsed_us = std::clamp<int64_t>(now_us - started_us, 0, duration_us);
+    return from + (target - from) * elapsed_us / duration_us;
+}
+
+}  // namespace
+
+MochanDisplay::MochanDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
+                             int width, int height, int offset_x, int offset_y, bool mirror_x,
+                             bool mirror_y, bool swap_xy)
+    : SpiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y, mirror_x, mirror_y,
+                    swap_xy) {
+    esp_timer_create_args_t timer_args = {
+        .callback = [](void* arg) { static_cast<MochanDisplay*>(arg)->HidePreview(); },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "mochan_preview",
+        .skip_unhandled_events = false,
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &preview_timer_));
+}
+
+MochanDisplay::~MochanDisplay() {
+    if (preview_timer_ != nullptr) {
+        esp_timer_stop(preview_timer_);
+        esp_timer_delete(preview_timer_);
+    }
+    if (eye_timer_ != nullptr) {
+        lv_timer_delete(eye_timer_);
+    }
+    if (notification_timer_ != nullptr) {
+        lv_timer_delete(notification_timer_);
+    }
+    // Delete labels before the borrowed text buffer and per-display font copies
+    // are destroyed. The face timer has already been removed above.
+    {
+        DisplayLockGuard lock(this);
+        if (lock && response_box_ != nullptr) {
+            lv_obj_delete(response_box_);
+            response_box_ = subtitle_ = response_cursor_ = notification_ = camera_image_ = nullptr;
+        }
+    }
+    for (auto* raster : {&left_raster_, &right_raster_}) {
+        if (raster->pixels != nullptr) {
+            lv_image_cache_drop(&raster->descriptor);
+            heap_caps_free(raster->pixels);
+        }
+    }
+    if (mouth_raster_.pixels != nullptr) {
+        lv_image_cache_drop(&mouth_raster_.descriptor);
+        heap_caps_free(mouth_raster_.pixels);
+    }
+    if (sleepy_zz_raster_.pixels != nullptr) {
+        lv_image_cache_drop(&sleepy_zz_raster_.descriptor);
+        heap_caps_free(sleepy_zz_raster_.pixels);
+    }
+}
+
+MochanDisplay::AmbientActivity MochanDisplay::GetAmbientActivity() const {
+    return ambient_activity_.load(std::memory_order_acquire);
+}
+
+bool MochanDisplay::GetFaceGeometry(const std::string& emotion, FaceGeometry& geometry,
+                                    bool* customized) const {
+    return face_geometry_store_.Get(emotion, geometry, customized);
+}
+
+bool MochanDisplay::SaveFaceGeometry(const std::string& emotion, FaceGeometry geometry) {
+    return face_geometry_store_.Save(emotion, geometry);
+}
+
+bool MochanDisplay::ResetFaceGeometry(const std::string& emotion) {
+    return face_geometry_store_.Reset(emotion);
+}
+
+bool MochanDisplay::ResetAllFaceGeometry() {
+    return face_geometry_store_.ResetAll();
+}
+
+AmbientGazePersonality MochanDisplay::GetAmbientGazePersonality() const {
+    return ambient_gaze_personality_.load(std::memory_order_acquire);
+}
+
+void MochanDisplay::ResetAmbientPrimitives(uint32_t generation) {
+    std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+    if (generation < ambient_primitive_generation_) {
+        return;
+    }
+    ambient_primitive_generation_ = generation;
+    requested_ambient_gaze_x_ = 0;
+    requested_ambient_gaze_y_ = 0;
+    ambient_gaze_request_generation_ = 0;
+    ambient_mouth_request_generation_ = 0;
+    ambient_yawn_request_generation_ = 0;
+    ambient_gaze_requested_ = false;
+    ambient_mouth_requested_ = false;
+    ambient_yawn_requested_ = false;
+}
+
+void MochanDisplay::SetAmbientGazeTarget(uint32_t generation, int8_t x, int8_t y) {
+    std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+    if (generation != ambient_primitive_generation_) {
+        return;
+    }
+    requested_ambient_gaze_x_ = x;
+    requested_ambient_gaze_y_ = y;
+    ambient_gaze_request_generation_ = generation;
+    ambient_gaze_requested_ = true;
+}
+
+void MochanDisplay::ClearAmbientGaze(uint32_t generation) {
+    std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+    if (generation != ambient_primitive_generation_) {
+        return;
+    }
+    requested_ambient_gaze_x_ = 0;
+    requested_ambient_gaze_y_ = 0;
+    ambient_gaze_request_generation_ = generation;
+    ambient_gaze_requested_ = false;
+}
+
+void MochanDisplay::TriggerAmbientMouth(uint32_t generation) {
+    std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+    if (generation == ambient_primitive_generation_) {
+        ambient_mouth_request_generation_ = generation;
+        ambient_mouth_requested_ = true;
+    }
+}
+
+void MochanDisplay::TriggerAmbientYawn(uint32_t generation) {
+    std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+    if (generation == ambient_primitive_generation_) {
+        ambient_yawn_request_generation_ = generation;
+        ambient_yawn_requested_ = true;
+    }
+}
+
+void MochanDisplay::SetAmbientBaseFace(uint32_t generation, const std::string& emotion) {
+    const std::string requested = IsSupportedEmotion(emotion) ? emotion : "neutral";
+    std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+    if (generation < ambient_base_face_generation_) {
+        return;
+    }
+    ambient_base_face_generation_ = generation;
+    ambient_base_face_request_generation_ = generation;
+    requested_ambient_base_face_ = requested;
+    ambient_base_face_requested_ = true;
+    ambient_base_face_request_pending_ = true;
+}
+
+void MochanDisplay::ClearAmbientBaseFace(uint32_t generation) {
+    std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+    if (generation < ambient_base_face_generation_) {
+        return;
+    }
+    ambient_base_face_generation_ = generation;
+    ambient_base_face_request_generation_ = generation;
+    requested_ambient_base_face_.clear();
+    ambient_base_face_requested_ = false;
+    ambient_base_face_request_pending_ = true;
+}
+
+void MochanDisplay::SetupUI() {
+    if (setup_ui_called_) {
+        return;
+    }
+
+    Display::SetupUI();
+    // xiaozhi-fonts 2.0 derives its common tier from locale strings and a
+    // tokenizer corpus, so it omits several valid Vietnamese letters (mostly
+    // uppercase). Seed the same dynamic fallback used by server glyph_push so
+    // response text stays complete even with servers that do not push them.
+    AddTextGlyphs(CreateVietnameseGlyphFallback(), 4);
+    DisplayLockGuard lock(this);
+    auto* screen = lv_screen_active();
+    lv_obj_set_style_bg_color(screen, kFaceBackground, 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(screen, 0, 0);
+    lv_obj_set_style_pad_all(screen, 0, 0);
+
+    container_ = lv_obj_create(screen);
+    lv_obj_set_size(container_, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(container_, kFaceBackground, 0);
+    lv_obj_set_style_bg_opa(container_, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(container_, 0, 0);
+    lv_obj_set_style_border_width(container_, 0, 0);
+    lv_obj_set_style_pad_all(container_, 0, 0);
+    lv_obj_set_scrollbar_mode(container_, LV_SCROLLBAR_MODE_OFF);
+
+    face_ = lv_obj_create(container_);
+    lv_obj_set_size(face_, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_opa(face_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(face_, 0, 0);
+    lv_obj_set_style_pad_all(face_, 0, 0);
+    lv_obj_set_scrollbar_mode(face_, LV_SCROLLBAR_MODE_OFF);
+
+    const bool raster_eyes = InitializeEyeRasters();
+    left_eye_ = raster_eyes ? lv_image_create(face_) : lv_obj_create(face_);
+    right_eye_ = raster_eyes ? lv_image_create(face_) : lv_obj_create(face_);
+    if (raster_eyes) {
+        lv_image_set_src(left_eye_, &left_raster_.descriptor);
+        lv_image_set_src(right_eye_, &right_raster_.descriptor);
+    }
+    for (auto* eye : {left_eye_, right_eye_}) {
+        lv_obj_set_style_bg_color(eye, kBrass, 0);
+        lv_obj_set_style_bg_opa(eye, raster_eyes ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(eye, 0, 0);
+        lv_obj_set_style_shadow_width(eye, 0, 0);
+        lv_obj_set_style_radius(eye, 22, 0);
+    }
+
+    left_eyelid_ = lv_obj_create(face_);
+    right_eyelid_ = lv_obj_create(face_);
+    for (auto* eyelid : {left_eyelid_, right_eyelid_}) {
+        lv_obj_set_style_bg_color(eyelid, kEyelidShadow, 0);
+        lv_obj_set_style_bg_opa(eyelid, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(eyelid, 0, 0);
+        lv_obj_set_style_radius(eyelid, 22, 0);
+        lv_obj_set_style_shadow_width(eyelid, 0, 0);
+        lv_obj_move_to_index(eyelid, 0);
+    }
+
+    if (InitializeSleepyZzRaster()) {
+        sleepy_zz_ = lv_image_create(face_);
+        lv_image_set_src(sleepy_zz_, &sleepy_zz_raster_.descriptor);
+        lv_obj_set_style_opa(sleepy_zz_, LV_OPA_TRANSP, 0);
+        lv_obj_add_flag(sleepy_zz_, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    if (InitializeMouthRaster()) {
+        mouth_ = lv_image_create(face_);
+        lv_image_set_src(mouth_, &mouth_raster_.descriptor);
+        lv_obj_set_style_transform_pivot_x(mouth_, MouthRaster::kWidth / 2, 0);
+        lv_obj_set_style_transform_pivot_y(mouth_, MouthRaster::kHeight / 2, 0);
+        lv_obj_align(mouth_, LV_ALIGN_CENTER, 0, 25);
+        lv_obj_add_flag(mouth_, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    auto* initial_theme = static_cast<LvglTheme*>(current_theme_);
+    desk_mode_ = std::make_unique<DeskModeView>();
+    desk_mode_->Setup(container_, height_);
+    desk_mode_->SetUse24Hour(
+        desk_mode_use_24_hour_.load(std::memory_order_acquire));
+    wifi_icon_ = lv_label_create(container_);
+    lv_label_set_text(wifi_icon_, MATERIAL_SYMBOLS_WIFI_OFF);
+    lv_obj_set_style_text_color(wifi_icon_, kSpinnerTrack, 0);
+    if (initial_theme != nullptr && initial_theme->icon_font() != nullptr) {
+        lv_obj_set_style_text_font(wifi_icon_, initial_theme->icon_font()->font(), 0);
+    }
+    lv_obj_set_style_transform_scale(wifi_icon_, 192, 0);
+    lv_obj_set_style_transform_pivot_x(wifi_icon_, 0, 0);
+    lv_obj_set_style_transform_pivot_y(wifi_icon_, 0, 0);
+    lv_obj_align(wifi_icon_, LV_ALIGN_TOP_LEFT, 8, 7);
+
+    status_dot_ = lv_obj_create(container_);
+    lv_obj_set_size(status_dot_, 7, 7);
+    lv_obj_set_style_radius(status_dot_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(status_dot_, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(status_dot_, kSpinnerTrack, 0);
+    lv_obj_set_style_border_width(status_dot_, 0, 0);
+    lv_obj_align(status_dot_, LV_ALIGN_TOP_RIGHT, -9, 9);
+
+    mic_mute_icon_ = lv_label_create(container_);
+    lv_label_set_text(mic_mute_icon_, MATERIAL_SYMBOLS_MIC_OFF);
+    lv_obj_set_style_text_color(mic_mute_icon_, lv_color_hex(0xff6257), 0);
+    if (initial_theme != nullptr && initial_theme->icon_font() != nullptr) {
+        lv_obj_set_style_text_font(mic_mute_icon_, initial_theme->icon_font()->font(), 0);
+    }
+    lv_obj_set_style_transform_scale(mic_mute_icon_, 160, 0);
+    // Keep the scaled glyph anchored to its right edge and vertically centered
+    // with the adjacent status dot.
+    lv_obj_set_style_transform_pivot_x(mic_mute_icon_, LV_PCT(100), 0);
+    lv_obj_set_style_transform_pivot_y(mic_mute_icon_, LV_PCT(50), 0);
+    lv_obj_align(mic_mute_icon_, LV_ALIGN_TOP_RIGHT, -25, 3);
+    lv_obj_add_flag(mic_mute_icon_, LV_OBJ_FLAG_HIDDEN);
+
+    battery_icon_ = lv_label_create(container_);
+    lv_label_set_text(battery_icon_, MATERIAL_SYMBOLS_BATTERY_ANDROID_FRAME_FULL);
+    lv_obj_set_style_text_color(battery_icon_, kBrassHighlight, 0);
+    if (initial_theme != nullptr && initial_theme->icon_font() != nullptr) {
+        lv_obj_set_style_text_font(battery_icon_, initial_theme->icon_font()->font(), 0);
+    }
+    // The battery glyph has considerably more internal whitespace than the Wi-Fi
+    // glyph, so it needs a larger transform to have the same apparent size.
+    lv_obj_set_style_transform_scale(battery_icon_, 224, 0);
+    lv_obj_set_style_transform_pivot_x(battery_icon_, 0, 0);
+    lv_obj_set_style_transform_pivot_y(battery_icon_, 0, 0);
+    // Wi-Fi, battery and percentage share the same visual center line. Their
+    // offsets differ because each glyph/font is rendered at a different scale.
+    lv_obj_align(battery_icon_, LV_ALIGN_TOP_LEFT, 31, 6);
+    lv_obj_add_flag(battery_icon_, LV_OBJ_FLAG_HIDDEN);
+
+    battery_status_ = lv_label_create(container_);
+    lv_label_set_text(battery_status_, "");
+    lv_obj_set_style_text_color(battery_status_, kBrassHighlight, 0);
+    if (initial_theme != nullptr && initial_theme->text_font() != nullptr) {
+        lv_obj_set_style_text_font(battery_status_, initial_theme->text_font()->font(), 0);
+    }
+    lv_obj_set_style_transform_scale(battery_status_, 160, 0);
+    lv_obj_set_style_transform_pivot_x(battery_status_, 0, 0);
+    lv_obj_set_style_transform_pivot_y(battery_status_, 0, 0);
+    lv_obj_align(battery_status_, LV_ALIGN_TOP_LEFT, 54, 7);
+
+    response_box_ = lv_obj_create(container_);
+    lv_obj_set_size(response_box_, width_ - 20, 112);
+    lv_obj_align(response_box_, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_set_style_bg_color(response_box_, lv_color_hex(0x11100d), 0);
+    lv_obj_set_style_bg_opa(response_box_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(response_box_, kSpinnerTrack, 0);
+    lv_obj_set_style_border_width(response_box_, 1, 0);
+    lv_obj_set_style_radius(response_box_, 8, 0);
+    lv_obj_set_style_pad_left(response_box_, 9, 0);
+    lv_obj_set_style_pad_right(response_box_, 9, 0);
+    lv_obj_set_style_pad_top(response_box_, 11, 0);
+    lv_obj_set_style_pad_bottom(response_box_, 7, 0);
+    lv_obj_set_scroll_dir(response_box_, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(response_box_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_flag(response_box_, LV_OBJ_FLAG_HIDDEN);
+
+    subtitle_ = lv_label_create(response_box_);
+    response_font_ = mochan_response_font_16;
+    response_fallback_font_ = font_noto_sans_basic_16_4;
+    response_font_.fallback = &response_fallback_font_;
+    auto* response_theme = static_cast<LvglTheme*>(current_theme_);
+    if (response_theme != nullptr && response_theme->text_font() != nullptr) {
+        response_fallback_font_.fallback = response_theme->text_font()->font();
+    }
+    // Native glyph size avoids a transform layer and makes layout/scroll use
+    // the same pixel geometry as the rendered text. Reserve space for a caret.
+    lv_obj_set_width(subtitle_, width_ - 44);
+    lv_obj_set_height(subtitle_, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_font(subtitle_, &response_font_, 0);
+    lv_obj_set_style_text_color(subtitle_, kBrassHighlight, 0);
+    lv_obj_set_style_text_align(subtitle_, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_long_mode(subtitle_, LV_LABEL_LONG_WRAP);
+    lv_label_set_text_static(subtitle_, response_text_buffer_.data());
+    lv_obj_align(subtitle_, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_add_flag(subtitle_, LV_OBJ_FLAG_HIDDEN);
+
+    response_cursor_ = lv_obj_create(subtitle_);
+    lv_obj_remove_style_all(response_cursor_);
+    lv_obj_set_size(response_cursor_, 2, 14);
+    lv_obj_set_style_bg_color(response_cursor_, kBrassHighlight, 0);
+    lv_obj_set_style_bg_opa(response_cursor_, LV_OPA_COVER, 0);
+    lv_obj_add_flag(response_cursor_, LV_OBJ_FLAG_FLOATING);
+    lv_obj_add_flag(response_cursor_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(response_cursor_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(response_cursor_, LV_OBJ_FLAG_CLICKABLE);
+
+    notification_ = lv_label_create(response_box_);
+    const int notification_text_width =
+        ((width_ - 38) * LV_SCALE_NONE + kNotificationTextScale - 1) / kNotificationTextScale;
+    lv_obj_set_width(notification_, notification_text_width);
+    lv_obj_set_style_text_color(notification_, kBrassHighlight, 0);
+    lv_obj_set_style_text_align(notification_, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_transform_scale(notification_, kNotificationTextScale, 0);
+    lv_obj_set_style_transform_pivot_x(notification_, 0, 0);
+    lv_obj_set_style_transform_pivot_y(notification_, 0, 0);
+    lv_label_set_long_mode(notification_, LV_LABEL_LONG_WRAP);
+    lv_obj_align(notification_, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_add_flag(notification_, LV_OBJ_FLAG_HIDDEN);
+
+    camera_image_ = lv_image_create(response_box_);
+    lv_obj_center(camera_image_);
+    lv_obj_add_flag(camera_image_, LV_OBJ_FLAG_HIDDEN);
+
+    SetFaceState(FaceState::kIdle);
+    eye_timer_ = lv_timer_create(
+        [](lv_timer_t* timer) {
+            auto* display = static_cast<MochanDisplay*>(lv_timer_get_user_data(timer));
+            display->AdvanceEyeAnimation();
+        },
+        kFaceAnimationPeriodMs, this);
+}
+
+void MochanDisplay::SetFaceState(FaceState state) {
+    ambient_gaze_personality_.store(ResolveAmbientGazePersonality(state),
+                                    std::memory_order_release);
+    if (face_state_ == state) {
+        UpdateStatusDot();
+        return;
+    }
+    animation_phase_ = 0;
+    blink_step_ = 0;
+    blink_countdown_ = static_cast<uint16_t>(80 + esp_random() % 61);
+    face_state_ = state;
+    UpdateStatusDot();
+    std::string emotion;
+    {
+        std::lock_guard<std::mutex> state_lock(emotion_mutex_);
+        emotion = current_emotion_;
+    }
+    UpdateEyes(0, IsIdleEligible(emotion));
+}
+
+bool MochanDisplay::CanShowDeskModeLocked() const {
+    return desk_mode_ != nullptr && splash_ == nullptr &&
+           activity_state_ == FaceState::kIdle && !emotion_active_ &&
+           !face_override_active_.load(std::memory_order_acquire) &&
+           !response_box_requested_ && response_box_progress_ == 0 &&
+           (notification_ == nullptr || lv_obj_has_flag(notification_, LV_OBJ_FLAG_HIDDEN)) &&
+           (camera_image_ == nullptr || lv_obj_has_flag(camera_image_, LV_OBJ_FLAG_HIDDEN));
+}
+
+bool MochanDisplay::CanCameraAttentionOwnFaceLocked() const {
+    return splash_ == nullptr && activity_state_ == FaceState::kIdle && !emotion_active_ &&
+           !face_override_active_.load(std::memory_order_acquire) && !status_dot_busy_ &&
+           !response_box_requested_ && response_box_progress_ == 0 &&
+           (notification_ == nullptr || lv_obj_has_flag(notification_, LV_OBJ_FLAG_HIDDEN)) &&
+           (camera_image_ == nullptr || lv_obj_has_flag(camera_image_, LV_OBJ_FLAG_HIDDEN));
+}
+
+bool MochanDisplay::CanCameraAttentionOwnFace() const {
+    DisplayLockGuard lock(const_cast<MochanDisplay*>(this));
+    return CanCameraAttentionOwnFaceLocked();
+}
+
+void MochanDisplay::CancelCameraAttentionLocked() {
+    if (!camera_attention_active_.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+    camera_attention_target_x_.store(0.0f, std::memory_order_release);
+    camera_attention_target_y_.store(0.0f, std::memory_order_release);
+    camera_attention_render_x_ = 0.0f;
+    camera_attention_render_y_ = 0.0f;
+    camera_attention_deform_x_ = 0.0f;
+    camera_attention_deform_y_ = 0.0f;
+    camera_attention_mouth_pose_x_ = 0.0f;
+    camera_attention_mouth_pose_y_ = 0.0f;
+    camera_attention_applied_x_.store(0.0f, std::memory_order_release);
+    camera_attention_applied_y_.store(0.0f, std::memory_order_release);
+    camera_attention_applied_px_x_.store(0, std::memory_order_release);
+    camera_attention_applied_px_y_.store(0, std::memory_order_release);
+    camera_attention_centered_.store(true, std::memory_order_release);
+}
+
+bool MochanDisplay::StartCameraAttention(bool from_desk_mode) {
+    DisplayLockGuard lock(this);
+    if (!CanCameraAttentionOwnFaceLocked()) {
+        return false;
+    }
+    if (desk_mode_active_.load(std::memory_order_acquire) != from_desk_mode) {
+        return false;
+    }
+    camera_attention_target_x_.store(0.0f, std::memory_order_release);
+    camera_attention_target_y_.store(0.0f, std::memory_order_release);
+    camera_attention_centered_.store(false, std::memory_order_release);
+    camera_attention_active_.store(true, std::memory_order_release);
+    exiting_mouth_emotion_.clear();
+    CancelAmbientAnimations();
+    if (from_desk_mode && desk_mode_active_.exchange(false, std::memory_order_acq_rel)) {
+        desk_mode_->Hide();
+    }
+    lv_obj_remove_flag(face_, LV_OBJ_FLAG_HIDDEN);
+    if (eye_timer_ != nullptr) {
+        lv_timer_resume(eye_timer_);
+    }
+    {
+        std::lock_guard<std::mutex> state_lock(emotion_mutex_);
+        current_emotion_ = "neutral";
+    }
+    emotion_active_ = false;
+    SetFaceState(FaceState::kIdle);
+    UpdateFaceLayoutTarget("neutral", esp_timer_get_time());
+    return true;
+}
+
+bool MochanDisplay::SetCameraAttentionTarget(float x, float y) {
+    if (!camera_attention_active_.load(std::memory_order_acquire)) {
+        return false;
+    }
+    const float target_x = std::clamp(x, -1.0f, 1.0f);
+    const float target_y = std::clamp(y, -1.0f, 1.0f);
+    camera_attention_target_x_.store(target_x, std::memory_order_release);
+    camera_attention_target_y_.store(target_y, std::memory_order_release);
+    if (std::fabs(target_x) >= 0.03f || std::fabs(target_y) >= 0.03f) {
+        camera_attention_centered_.store(false, std::memory_order_release);
+    }
+    return true;
+}
+
+void MochanDisplay::EndCameraAttention(bool return_to_desk_mode) {
+    DisplayLockGuard lock(this);
+    CancelCameraAttentionLocked();
+    if (return_to_desk_mode && CanShowDeskModeLocked()) {
+        FreezeMouthForExit();
+        CancelAmbientAnimations();
+        lv_obj_add_flag(face_, LV_OBJ_FLAG_HIDDEN);
+        desk_mode_->UpdateClock(time(nullptr));
+        desk_mode_->Show();
+        desk_mode_active_.store(true, std::memory_order_release);
+        if (eye_timer_ != nullptr) {
+            lv_timer_pause(eye_timer_);
+        }
+    } else {
+        ApplyRestingFaceLocked();
+    }
+}
+
+bool MochanDisplay::IsCameraAttentionActive() const {
+    return camera_attention_active_.load(std::memory_order_acquire);
+}
+
+bool MochanDisplay::IsCameraAttentionCentered() const {
+    return camera_attention_centered_.load(std::memory_order_acquire);
+}
+
+float MochanDisplay::GetCameraAttentionAppliedX() const {
+    return camera_attention_applied_x_.load(std::memory_order_acquire);
+}
+
+float MochanDisplay::GetCameraAttentionAppliedY() const {
+    return camera_attention_applied_y_.load(std::memory_order_acquire);
+}
+
+int MochanDisplay::GetCameraAttentionAppliedPxX() const {
+    return camera_attention_applied_px_x_.load(std::memory_order_acquire);
+}
+
+int MochanDisplay::GetCameraAttentionAppliedPxY() const {
+    return camera_attention_applied_px_y_.load(std::memory_order_acquire);
+}
+
+void MochanDisplay::HideDeskModeLocked() {
+    if (!desk_mode_active_.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+    desk_mode_->Hide();
+    lv_obj_remove_flag(face_, LV_OBJ_FLAG_HIDDEN);
+    if (eye_timer_ != nullptr) {
+        lv_timer_resume(eye_timer_);
+    }
+    ApplyRestingFaceLocked();
+}
+
+void MochanDisplay::SetDeskModeActive(bool active) {
+    DisplayLockGuard lock(this);
+    if (camera_attention_active_.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (!active || !CanShowDeskModeLocked()) {
+        HideDeskModeLocked();
+        return;
+    }
+    desk_mode_->UpdateClock(time(nullptr));
+    if (desk_mode_active_.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    FreezeMouthForExit();
+    CancelAmbientAnimations();
+    lv_obj_add_flag(face_, LV_OBJ_FLAG_HIDDEN);
+    desk_mode_->Show();
+    if (eye_timer_ != nullptr) {
+        lv_timer_pause(eye_timer_);
+    }
+}
+
+bool MochanDisplay::IsDeskModeActive() const {
+    return desk_mode_active_.load(std::memory_order_acquire);
+}
+
+void MochanDisplay::SetDeskModeUse24Hour(bool use_24_hour) {
+    desk_mode_use_24_hour_.store(use_24_hour, std::memory_order_release);
+    DisplayLockGuard lock(this);
+    if (desk_mode_ != nullptr) {
+        desk_mode_->SetUse24Hour(use_24_hour);
+    }
+}
+
+void MochanDisplay::SetDeskModeEnvironment(bool temperature_valid, float temperature_c,
+                                           bool humidity_valid, float humidity_percent) {
+    DisplayLockGuard lock(this);
+    if (desk_mode_ == nullptr) {
+        return;
+    }
+    desk_mode_->SetEnvironment(temperature_valid, temperature_c, humidity_valid,
+                               humidity_percent);
+    if (desk_mode_active_.load(std::memory_order_acquire)) {
+        desk_mode_->UpdateClock(time(nullptr));
+    }
+}
+
+void MochanDisplay::UpdateStatusDot() {
+    if (status_dot_ == nullptr) {
+        return;
+    }
+
+    // Matches the original Mochan status language: green idle, yellow
+    // listening, blue speaking. ASR preparation/processing uses a brighter
+    // coral red so it is visibly busy rather than ready to hear speech.
+    lv_color_t color = lv_color_hex(0x53c58b);
+    if (status_dot_busy_) {
+        color = lv_color_hex(0xff6257);
+    } else if (activity_state_ == FaceState::kListening) {
+        color = lv_color_hex(0xf0c94b);
+    } else if (activity_state_ == FaceState::kSpeaking) {
+        color = lv_color_hex(0x4aa3ff);
+    } else if (activity_state_ == FaceState::kThinking) {
+        color = lv_color_hex(0x8c7140);
+    }
+    lv_obj_set_style_bg_color(status_dot_, color, 0);
+}
+
+void MochanDisplay::ShowResponseBox() {
+    CancelCameraAttentionLocked();
+    HideDeskModeLocked();
+    FreezeMouthForExit();
+    CancelAmbientAnimations();
+    response_box_requested_ = true;
+    const int64_t now_us = esp_timer_get_time();
+    SetFaceLayoutTarget(0, now_us);
+    AdvanceResponseBoxTransition(now_us);
+}
+
+void MochanDisplay::HideResponseBox() {
+    response_box_requested_ = false;
+    AdvanceResponseBoxTransition(esp_timer_get_time());
+}
+
+bool MochanDisplay::AllowsNaturalBlink(FaceState state) {
+    // Explicit expressions own their eyelids; an unrelated blink must not
+    // overwrite a wink, squint or asymmetric pose.
+    return state == FaceState::kIdle || state == FaceState::kListening ||
+           state == FaceState::kSpeaking || state >= FaceState::kLookLeft;
+}
+
+bool MochanDisplay::CanShowFullFace(const std::string& emotion) const {
+    if (mouth_ == nullptr || activity_state_ != FaceState::kIdle || response_box_ == nullptr ||
+        response_box_requested_ || response_box_progress_ > kFaceReturnStartResponseProgress) {
+        return false;
+    }
+    return HasMouthGeometry(emotion);
+}
+
+bool MochanDisplay::IsIdleEligible(const std::string& emotion) const {
+    const bool semantic_sleepy = emotion_active_ && emotion == "sleepy";
+    return CanShowFullFace(emotion) && response_box_progress_ == 0 &&
+           (!emotion_active_ || semantic_sleepy) &&
+           splash_ == nullptr &&
+           (camera_image_ == nullptr || lv_obj_has_flag(camera_image_, LV_OBJ_FLAG_HIDDEN)) &&
+           (notification_ == nullptr || lv_obj_has_flag(notification_, LV_OBJ_FLAG_HIDDEN));
+}
+
+void MochanDisplay::SetFaceLayoutTarget(uint16_t target, int64_t now_us) {
+    if (target == face_layout_target_) {
+        return;
+    }
+    face_layout_from_ = face_layout_progress_;
+    face_layout_target_ = target;
+    face_layout_transition_started_us_ = now_us;
+}
+
+void MochanDisplay::UpdateFaceLayoutTarget(const std::string& emotion, int64_t now_us) {
+    const uint16_t target = CanShowFullFace(emotion) ? 256 : 0;
+    const std::string& layout_emotion =
+        target == 0 && !exiting_mouth_emotion_.empty() ? exiting_mouth_emotion_ : emotion;
+    int idle_eye_offset_y = 0;
+    if (GetMouthIdleEyeOffset(layout_emotion, idle_eye_offset_y)) {
+        face_layout_full_offset_y_ = TimedValue(
+            face_layout_full_offset_from_y_, face_layout_full_offset_target_y_,
+            face_layout_emotion_transition_started_us_, kEmotionLayoutTransitionMs, now_us);
+        if (idle_eye_offset_y != face_layout_full_offset_target_y_) {
+            if (face_layout_progress_ == 0) {
+                face_layout_full_offset_y_ = idle_eye_offset_y;
+                face_layout_full_offset_from_y_ = idle_eye_offset_y;
+                face_layout_full_offset_target_y_ = idle_eye_offset_y;
+            } else {
+                face_layout_full_offset_from_y_ = face_layout_full_offset_y_;
+                face_layout_full_offset_target_y_ = idle_eye_offset_y;
+            }
+            face_layout_emotion_transition_started_us_ = now_us;
+        }
+    }
+    SetFaceLayoutTarget(target, now_us);
+    if (target != 0 && mouth_ != nullptr) {
+        exiting_mouth_emotion_.clear();
+        if (lv_obj_has_flag(mouth_, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_remove_flag(mouth_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void MochanDisplay::FreezeMouthForExit() {
+    if (face_layout_progress_ == 0 || !exiting_mouth_emotion_.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> state_lock(emotion_mutex_);
+    if (HasMouthGeometry(current_emotion_)) {
+        exiting_mouth_emotion_ = current_emotion_;
+    }
+}
+
+void MochanDisplay::AdvanceResponseBoxTransition(int64_t now_us) {
+    if (response_box_ == nullptr) {
+        return;
+    }
+
+    // Let the panel fade overlap the latter part of the face movement. On the
+    // way back, the face starts returning while the last of the panel fades.
+    const uint16_t target =
+        response_box_requested_ && face_layout_progress_ <= kResponseFadeInStartFaceProgress ? 256
+                                                                                             : 0;
+    if (target != response_box_target_) {
+        response_box_from_ = response_box_progress_;
+        response_box_target_ = target;
+        response_box_transition_started_us_ = now_us;
+        if (target != 0 && response_box_progress_ == 0) {
+            lv_obj_remove_flag(response_box_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    response_box_progress_ =
+        TimedProgress(response_box_from_, response_box_target_, response_box_transition_started_us_,
+                      kResponseBoxFadeMs, now_us);
+
+    const uint32_t progress = response_box_progress_;
+    const uint32_t eased = progress * progress * (3 * 256 - 2 * progress) / (256 * 256);
+    const uint8_t opacity = eased * LV_OPA_COVER / 256;
+    if (response_box_opacity_ != opacity) {
+        response_box_opacity_ = opacity;
+        lv_obj_set_style_opa(response_box_, opacity, 0);
+    }
+    if (preview_show_pending_ && response_box_progress_ == 256) {
+        preview_show_pending_ = false;
+        if (camera_image_cached_ != nullptr) {
+            lv_obj_remove_flag(camera_image_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(camera_image_);
+            lv_obj_invalidate(camera_image_);
+        }
+        esp_timer_stop(preview_timer_);
+        ESP_ERROR_CHECK(esp_timer_start_once(preview_timer_, kPreviewDurationMs * 1000));
+    }
+    if (!response_box_requested_ && response_box_progress_ == 0) {
+        if (!lv_obj_has_flag(response_box_, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_add_flag(response_box_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void MochanDisplay::AdvanceFaceLayout(int64_t now_us) {
+    face_layout_full_offset_y_ =
+        TimedValue(face_layout_full_offset_from_y_, face_layout_full_offset_target_y_,
+                   face_layout_emotion_transition_started_us_, kEmotionLayoutTransitionMs, now_us);
+    face_layout_progress_ =
+        TimedProgress(face_layout_from_, face_layout_target_, face_layout_transition_started_us_,
+                      kFaceLayoutTransitionMs, now_us);
+    const uint32_t progress = face_layout_progress_;
+    const uint32_t eased = progress * progress * (3 * 256 - 2 * progress) / (256 * 256);
+    face_layout_offset_y_ = face_layout_full_offset_y_ * static_cast<int>(eased) / 256;
+}
+
+void MochanDisplay::CancelAmbientAnimations() {
+    yawn_active_ = false;
+    yawn_amount_ = 0;
+    yawn_started_ms_ = 0;
+    mouth_motion_active_ = false;
+    mouth_motion_amount_ = 0;
+    mouth_motion_started_ms_ = 0;
+    mouth_motion_duration_ms_ = 0;
+    mouth_motion_peak_ = 0;
+    ambient_gaze_target_x_ = 0;
+    ambient_gaze_target_y_ = 0;
+    std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+    requested_ambient_gaze_x_ = 0;
+    requested_ambient_gaze_y_ = 0;
+    ambient_gaze_request_generation_ = 0;
+    ambient_mouth_request_generation_ = 0;
+    ambient_yawn_request_generation_ = 0;
+    ambient_gaze_requested_ = false;
+    ambient_mouth_requested_ = false;
+    ambient_yawn_requested_ = false;
+}
+
+void MochanDisplay::ConsumeAmbientPrimitiveRequests(const std::string& emotion,
+                                                    bool idle_eligible) {
+    if (camera_attention_active_.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+    if (applied_ambient_primitive_generation_ != ambient_primitive_generation_) {
+        applied_ambient_primitive_generation_ = ambient_primitive_generation_;
+        yawn_active_ = false;
+        yawn_amount_ = 0;
+        yawn_started_ms_ = 0;
+        mouth_motion_active_ = false;
+        mouth_motion_amount_ = 0;
+        mouth_motion_started_ms_ = 0;
+        mouth_motion_duration_ms_ = 0;
+        mouth_motion_peak_ = 0;
+    }
+    const bool gaze_request_current =
+        ambient_gaze_request_generation_ == ambient_primitive_generation_;
+    ambient_gaze_target_x_ =
+        ambient_gaze_requested_ && gaze_request_current ? requested_ambient_gaze_x_ : 0;
+    ambient_gaze_target_y_ =
+        ambient_gaze_requested_ && gaze_request_current ? requested_ambient_gaze_y_ : 0;
+    if (ambient_mouth_requested_ &&
+        ambient_mouth_request_generation_ == ambient_primitive_generation_) {
+        if (yawn_active_) {
+            ambient_mouth_requested_ = false;
+            ambient_mouth_request_generation_ = 0;
+        } else if (idle_eligible) {
+            ambient_mouth_requested_ = false;
+            ambient_mouth_request_generation_ = 0;
+            StartAmbientMouthAnimation(emotion, esp_timer_get_time() / 1000);
+        }
+    }
+    if (ambient_yawn_requested_ &&
+        ambient_yawn_request_generation_ == ambient_primitive_generation_ &&
+        emotion == "sleepy" && idle_eligible) {
+        ambient_yawn_requested_ = false;
+        ambient_yawn_request_generation_ = 0;
+        mouth_motion_active_ = false;
+        mouth_motion_amount_ = 0;
+        mouth_motion_duration_ms_ = 0;
+        mouth_motion_peak_ = 0;
+        yawn_active_ = true;
+        yawn_started_ms_ = esp_timer_get_time() / 1000;
+    }
+}
+
+void MochanDisplay::ConsumeAmbientBaseFaceRequest() {
+    if (camera_attention_active_.load(std::memory_order_acquire)) {
+        return;
+    }
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(ambient_primitive_mutex_);
+        if (!ambient_base_face_request_pending_ ||
+            ambient_base_face_request_generation_ != ambient_base_face_generation_) {
+            return;
+        }
+        ambient_base_face_request_pending_ = false;
+        const std::string next_face = ambient_base_face_requested_
+                                          ? requested_ambient_base_face_
+                                          : std::string{};
+        changed = applied_ambient_base_face_generation_ != ambient_base_face_generation_ ||
+                  ambient_base_face_ != next_face;
+        if (!changed) {
+            return;
+        }
+        applied_ambient_base_face_generation_ = ambient_base_face_generation_;
+        ambient_base_face_ = next_face;
+    }
+    ApplyRestingFaceLocked();
+}
+
+MochanDisplay::AmbientMouthProfile MochanDisplay::ResolveAmbientMouthProfile(
+    const std::string& emotion) {
+    if (emotion == "happy" || emotion == "laughing" || emotion == "funny" ||
+        emotion == "winking" || emotion == "silly") {
+        return AmbientMouthProfile::kPlayful;
+    }
+    if (emotion == "thinking" || emotion == "confused" || emotion == "suspicious" ||
+        emotion == "surprised") {
+        return AmbientMouthProfile::kCurious;
+    }
+    if (emotion == "relaxed" || emotion == "loving" || emotion == "delicious" ||
+        emotion == "cool" || emotion == "confident") {
+        return AmbientMouthProfile::kRelaxed;
+    }
+    if (emotion == "sleepy") {
+        return AmbientMouthProfile::kSleepy;
+    }
+    return AmbientMouthProfile::kNeutral;
+}
+
+void MochanDisplay::StartAmbientMouthAnimation(const std::string& emotion, int64_t now_ms) {
+    int duration_min_ms = 450;
+    int duration_max_ms = 700;
+    int peak_min = 48;
+    int peak_max = 80;
+    switch (ResolveAmbientMouthProfile(emotion)) {
+        case AmbientMouthProfile::kNeutral:
+            break;
+        case AmbientMouthProfile::kPlayful:
+            duration_min_ms = 400;
+            duration_max_ms = 750;
+            peak_min = 90;
+            peak_max = 140;
+            break;
+        case AmbientMouthProfile::kCurious:
+            duration_min_ms = 450;
+            duration_max_ms = 800;
+            peak_min = 64;
+            peak_max = 100;
+            break;
+        case AmbientMouthProfile::kRelaxed:
+            duration_min_ms = 650;
+            duration_max_ms = 950;
+            peak_min = 48;
+            peak_max = 80;
+            break;
+        case AmbientMouthProfile::kSleepy:
+            duration_min_ms = 800;
+            duration_max_ms = 1200;
+            peak_min = 40;
+            peak_max = 72;
+            break;
+    }
+
+    uint8_t variant = static_cast<uint8_t>(esp_random() %
+                                           static_cast<uint8_t>(AmbientMouthVariant::kCount));
+    if (variant == static_cast<uint8_t>(last_mouth_motion_variant_)) {
+        variant = static_cast<uint8_t>((variant + 1 + esp_random() % 2) %
+                                       static_cast<uint8_t>(AmbientMouthVariant::kCount));
+    }
+    mouth_motion_variant_ = static_cast<AmbientMouthVariant>(variant);
+    last_mouth_motion_variant_ = mouth_motion_variant_;
+    mouth_motion_duration_ms_ = RandomRange(duration_min_ms, duration_max_ms);
+    mouth_motion_peak_ = static_cast<int16_t>(RandomRange(peak_min, peak_max));
+    mouth_motion_amount_ = 0;
+    mouth_motion_active_ = true;
+    mouth_motion_started_ms_ = now_ms;
+}
+
+void MochanDisplay::AdvanceMouthAnimation(bool idle_eligible) {
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    if (!idle_eligible || yawn_active_) {
+        mouth_motion_active_ = false;
+        mouth_motion_amount_ = 0;
+        mouth_motion_started_ms_ = 0;
+        mouth_motion_duration_ms_ = 0;
+        mouth_motion_peak_ = 0;
+        return;
+    }
+    if (!mouth_motion_active_) {
+        return;
+    }
+
+    const int64_t elapsed = now_ms - mouth_motion_started_ms_;
+    const int64_t duration = mouth_motion_duration_ms_;
+    if (elapsed >= duration) {
+        mouth_motion_active_ = false;
+        mouth_motion_amount_ = 0;
+        mouth_motion_started_ms_ = 0;
+        mouth_motion_duration_ms_ = 0;
+        mouth_motion_peak_ = 0;
+        return;
+    }
+
+    switch (mouth_motion_variant_) {
+        case AmbientMouthVariant::kMicroPulse: {
+            const int64_t peak_ms = duration * 2 / 5;
+            mouth_motion_amount_ = elapsed < peak_ms
+                                       ? InterpolateMouthAmount(elapsed, 0, peak_ms, 0,
+                                                                mouth_motion_peak_)
+                                       : InterpolateMouthAmount(elapsed, peak_ms, duration,
+                                                                mouth_motion_peak_, 0);
+            break;
+        }
+        case AmbientMouthVariant::kSoftOpenClose: {
+            const int64_t peak_ms = duration * 3 / 10;
+            const int64_t close_ms = duration * 7 / 10;
+            const int close_amount = -mouth_motion_peak_ / 4;
+            if (elapsed < peak_ms) {
+                mouth_motion_amount_ = InterpolateMouthAmount(elapsed, 0, peak_ms, 0,
+                                                               mouth_motion_peak_);
+            } else if (elapsed < close_ms) {
+                mouth_motion_amount_ = InterpolateMouthAmount(
+                    elapsed, peak_ms, close_ms, mouth_motion_peak_, close_amount);
+            } else {
+                mouth_motion_amount_ = InterpolateMouthAmount(elapsed, close_ms, duration,
+                                                               close_amount, 0);
+            }
+            break;
+        }
+        case AmbientMouthVariant::kDoubleTwitch: {
+            const int64_t first_peak_ms = duration / 5;
+            const int64_t first_zero_ms = duration * 2 / 5;
+            const int64_t second_peak_ms = duration * 13 / 20;
+            const int second_peak = mouth_motion_peak_ * 2 / 3;
+            if (elapsed < first_peak_ms) {
+                mouth_motion_amount_ = InterpolateMouthAmount(elapsed, 0, first_peak_ms, 0,
+                                                               mouth_motion_peak_);
+            } else if (elapsed < first_zero_ms) {
+                mouth_motion_amount_ = InterpolateMouthAmount(
+                    elapsed, first_peak_ms, first_zero_ms, mouth_motion_peak_, 0);
+            } else if (elapsed < second_peak_ms) {
+                mouth_motion_amount_ = InterpolateMouthAmount(elapsed, first_zero_ms,
+                                                               second_peak_ms, 0, second_peak);
+            } else {
+                mouth_motion_amount_ = InterpolateMouthAmount(elapsed, second_peak_ms,
+                                                               duration, second_peak, 0);
+            }
+            break;
+        }
+        case AmbientMouthVariant::kCount:
+            mouth_motion_amount_ = 0;
+            break;
+    }
+}
+
+void MochanDisplay::AdvanceYawnAnimation(const std::string& emotion) {
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    const bool eligible = emotion == "sleepy" && CanShowFullFace(emotion) &&
+                          response_box_progress_ == 0 && splash_ == nullptr &&
+                          (camera_image_ == nullptr ||
+                           lv_obj_has_flag(camera_image_, LV_OBJ_FLAG_HIDDEN)) &&
+                          (notification_ == nullptr ||
+                           lv_obj_has_flag(notification_, LV_OBJ_FLAG_HIDDEN));
+    if (!eligible) {
+        yawn_active_ = false;
+        yawn_amount_ = 0;
+        yawn_started_ms_ = 0;
+        return;
+    }
+
+    if (yawn_active_) {
+        const int64_t elapsed = now_ms - yawn_started_ms_;
+        if (elapsed < kYawnOpenMs) {
+            yawn_amount_ = static_cast<uint16_t>(elapsed * 256 / kYawnOpenMs);
+        } else if (elapsed < kYawnOpenMs + kYawnHoldMs) {
+            yawn_amount_ = 256;
+        } else if (elapsed < kYawnOpenMs + kYawnHoldMs + kYawnCloseMs) {
+            yawn_amount_ = static_cast<uint16_t>(
+                (kYawnOpenMs + kYawnHoldMs + kYawnCloseMs - elapsed) * 256 / kYawnCloseMs);
+        } else if (elapsed < kYawnOpenMs + kYawnHoldMs + kYawnCloseMs + kYawnSettleMs) {
+            yawn_amount_ = 0;
+        } else {
+            yawn_active_ = false;
+            yawn_amount_ = 0;
+        }
+    }
+}
+
+void MochanDisplay::AdvanceEyeAnimation() {
+    const int64_t callback_started_us = esp_timer_get_time();
+    const int64_t frame_interval_us =
+        last_animation_callback_us_ == 0 ? 0 : callback_started_us - last_animation_callback_us_;
+    last_animation_callback_us_ = callback_started_us;
+    max_frame_interval_us_ = std::max(max_frame_interval_us_, frame_interval_us);
+    if (splash_ != nullptr) {
+        RecordAnimationTiming(callback_started_us, frame_interval_us);
+        return;
+    }
+    ConsumeAmbientBaseFaceRequest();
+    std::string emotion;
+    {
+        std::lock_guard<std::mutex> state_lock(emotion_mutex_);
+        emotion = current_emotion_;
+    }
+    ++animation_phase_;
+    const bool idle_eligible = IsIdleEligible(emotion);
+    ConsumeAmbientPrimitiveRequests(emotion, idle_eligible);
+    AdvanceYawnAnimation(emotion);
+    AdvanceMouthAnimation(idle_eligible);
+    UpdateFaceLayoutTarget(emotion, callback_started_us);
+    AdvanceFaceLayout(callback_started_us);
+    AdvanceResponseBoxTransition(callback_started_us);
+    // If the response fade crossed the return threshold in this callback,
+    // start the face transition timestamp now rather than one frame later.
+    UpdateFaceLayoutTarget(emotion, callback_started_us);
+    uint8_t blink_amount = 0;
+    if (AllowsNaturalBlink(face_state_) || idle_eligible) {
+        static constexpr uint8_t kBlinkCurve[] = {35, 75, 100, 70, 30};
+        if (blink_step_ != 0) {
+            blink_amount = kBlinkCurve[blink_step_ - 1];
+            ++blink_step_;
+            if (blink_step_ > sizeof(kBlinkCurve)) {
+                blink_step_ = 0;
+                blink_countdown_ = static_cast<uint16_t>(80 + esp_random() % 61);
+            }
+        } else if (blink_countdown_ > 0) {
+            --blink_countdown_;
+        } else {
+            blink_step_ = 1;
+        }
+    }
+    if (yawn_active_) {
+        blink_amount = std::max<uint8_t>(blink_amount, yawn_amount_ * 72 / 256);
+    }
+    const int64_t face_work_started_us = esp_timer_get_time();
+    const bool ambient_visual_eligible = response_box_progress_ == 0 && splash_ == nullptr &&
+                                         (camera_image_ == nullptr ||
+                                          lv_obj_has_flag(camera_image_, LV_OBJ_FLAG_HIDDEN)) &&
+                                         (notification_ == nullptr ||
+                                          lv_obj_has_flag(notification_, LV_OBJ_FLAG_HIDDEN));
+    UpdateEyes(blink_amount, ambient_visual_eligible);
+    AdvanceSleepyZzAnimation(ambient_visual_eligible);
+    UpdateMouth(blink_amount, emotion);
+    max_face_work_us_ = std::max(max_face_work_us_, esp_timer_get_time() - face_work_started_us);
+    // Keep typewriter work on the face frame clock. Time-based glyph credit
+    // preserves a steady reveal when an occasional display frame arrives late.
+    if (typing_active_ || live_user_transcript_active_) {
+        const int64_t text_work_started_us = esp_timer_get_time();
+        if (live_user_transcript_active_) {
+            UpdateLiveUserTranscript(callback_started_us);
+        } else {
+            UpdateTyping(callback_started_us);
+        }
+        max_text_work_us_ = std::max(max_text_work_us_, esp_timer_get_time() - text_work_started_us);
+    }
+    AdvanceResponseTextScroll(callback_started_us);
+    RecordAnimationTiming(callback_started_us, frame_interval_us);
+}
+
+void MochanDisplay::RecordAnimationTiming(int64_t callback_started_us, int64_t frame_interval_us) {
+    const int64_t callback_duration_us = esp_timer_get_time() - callback_started_us;
+    max_callback_duration_us_ = std::max(max_callback_duration_us_, callback_duration_us);
+    if (last_performance_log_us_ == 0) {
+        last_performance_log_us_ = callback_started_us;
+        return;
+    }
+    if (callback_started_us - last_performance_log_us_ < kPerformanceLogIntervalUs) {
+        return;
+    }
+    ESP_LOGD(kTag, "Face perf: frame=%lld us (max %lld), callback=%lld us (max %lld), "
+                  "face_max=%lld us, text_max=%lld us",
+             static_cast<long long>(frame_interval_us),
+             static_cast<long long>(max_frame_interval_us_),
+             static_cast<long long>(callback_duration_us),
+             static_cast<long long>(max_callback_duration_us_),
+             static_cast<long long>(max_face_work_us_),
+             static_cast<long long>(max_text_work_us_));
+    last_performance_log_us_ = callback_started_us;
+    max_frame_interval_us_ = 0;
+    max_callback_duration_us_ = 0;
+    max_face_work_us_ = 0;
+    max_text_work_us_ = 0;
+}

@@ -1,0 +1,19 @@
+DUONGBOT V1 MUSIC — BẢN SAO LƯU CHUẨN
+
+Phiên bản hoàn thiện tính năng phát nhạc (Offline GitHub + Online YouTube/SoundCloud Stream), hiệu ứng LED hạt ma trận (Dotted LED Matrix), điều khiển chuyển động wobble theo nhạc và nút BOOT ngắt nhanh.
+
+CÁCH 1: NẠP NHANH BẢN FULL 1 FILE KHÔNG CẦN BUILD
+Dùng file: duong_ai_cam_robot_full_0x0.bin (nạp vào địa chỉ 0x0)
+Lệnh nạp qua ESP-IDF:
+  esptool --chip esp32s3 -p COM11 -b 460800 write-flash 0x0 duong_ai_cam_robot_full_0x0.bin
+
+CÁCH 2: BUILD TỪ MÃ NGUỒN (ESP-IDF v6.1)
+Mở ESP-IDF Command Prompt (CMD) hoặc PowerShell ESP-IDF:
+  cd /d C:\Users\kvdn1\OneDrive\Desktop\DUONGBOT_V1_MUSIC
+  python scripts/build.py --language vi-VN
+  idf.py -p COM11 flash
+
+Bảng chân GPIO: DUONGBOT_AI_bang_chan_GPIO.jpg
+Cấu hình chân: main/robot/config/hardware_config.h
+Ngưỡng/tuning: main/robot/config/tuning.h
+Target: ESP32-S3 N16R8 CAM

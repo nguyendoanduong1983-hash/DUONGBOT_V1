@@ -1,0 +1,267 @@
+#pragma once
+
+#include <driver/i2c_master.h>
+#include <esp_lcd_panel_io.h>
+#include <esp_lcd_panel_ops.h>
+
+#include <array>
+#include <cstdint>
+#include <mutex>
+#include <string>
+
+#include "face_geometry.h"
+#include "roboeyes_face_renderer.h"
+#include "secondary_oled_layout.h"
+
+class SecondaryOled {
+public:
+    using EqualizerBars = std::array<uint8_t, 16>;
+
+    enum class WidgetType : uint8_t {
+        kBranding,
+        kDistance,
+        kPower,
+        kMotion,
+        kCapacity,
+        kClimate,
+        kPressure,
+        kLight,
+        kBatteryRemaining,
+        kNetwork,
+    };
+
+    enum class PowerMode : uint8_t {
+        kCurrent,
+        kPower,
+        kCurrentAndPower,
+    };
+
+    enum class MotionMode : uint8_t {
+        kState,
+        kTilt,
+        kStateAndTilt,
+    };
+
+    enum class CapacityMode : uint8_t {
+        kMah,
+        kElapsed,
+        kMahAndElapsed,
+    };
+
+    enum class ClimateMode : uint8_t {
+        kTemperature,
+        kHumidity,
+        kTemperatureAndHumidity,
+    };
+
+    enum class PressureMode : uint8_t {
+        kPressure,
+        kCompact,
+    };
+
+    enum class LightMode : uint8_t {
+        kLux,
+        kLevel,
+        kLuxAndLevel,
+    };
+
+    enum class NetworkState : uint8_t {
+        kConnected,
+        kScanning,
+        kConnecting,
+        kDisconnected,
+        kConfigMode,
+    };
+
+    using WidgetSize = secondary_oled_layout::WidgetSize;
+
+    struct WidgetConfig {
+        WidgetType type = WidgetType::kBranding;
+        WidgetSize size = WidgetSize::kSmall;
+        bool enabled = true;
+        uint8_t mode = 0;
+    };
+
+    struct Config {
+        bool flip_180 = false;
+        uint8_t contrast = 128;
+        bool auto_contrast_enabled = false;
+        uint8_t auto_contrast_minimum = 48;
+        uint8_t auto_contrast_maximum = 224;
+        std::string brand = "DuongBot";
+        std::string distance_prefix = "Dist";
+        std::array<WidgetConfig, secondary_oled_layout::kMaxWidgets> widgets = {{
+            {WidgetType::kBranding, WidgetSize::kSmall, true, 0},
+            {WidgetType::kDistance, WidgetSize::kSmall, true, 0},
+            {WidgetType::kPower, WidgetSize::kSmall, true, 2},
+            {WidgetType::kCapacity, WidgetSize::kMedium, true, 2},
+            {WidgetType::kMotion, WidgetSize::kMedium, true, 2},
+            {WidgetType::kClimate, WidgetSize::kSmall, false, 2},
+            {WidgetType::kPressure, WidgetSize::kSmall, false, 0},
+            {WidgetType::kLight, WidgetSize::kSmall, false, 2},
+            {WidgetType::kBatteryRemaining, WidgetSize::kMedium, true, 0},
+            {WidgetType::kNetwork, WidgetSize::kMedium, true, 0},
+        }};
+    };
+
+    struct Telemetry {
+        bool conversation_active = false;
+        std::string face_emotion = "neutral";
+        FaceGeometry face_geometry{};
+        bool distance_valid = false;
+        int distance_mm = 0;
+        bool power_valid = false;
+        int current_ma = 0;
+        int power_mw = 0;
+        bool motion_valid = false;
+        std::string motion_state = "calibrating";
+        int roll_deg = 0;
+        int pitch_deg = 0;
+        bool capacity_active = false;
+        bool capacity_measuring = false;
+        uint32_t capacity_uah = 0;
+        uint32_t capacity_seconds = 0;
+        bool cliff_detected = false;
+        NetworkState network_state = NetworkState::kConnecting;
+        std::string ip_address;
+        bool gyro_turn_pending = false;
+        bool gyro_turn_active = false;
+        int gyro_turn_target_deg = 0;
+        int gyro_turn_progress_deg = 0;
+        int gyro_turn_intensity_percent = 0;
+        bool motion_calibrating = false;
+        bool low_battery = false;
+        int battery_percent = 0;
+        uint32_t battery_remaining_mah = 0;
+        int battery_voltage_mv = 0;
+        bool temperature_valid = false;
+        int temperature_tenths_c = 0;
+        bool humidity_valid = false;
+        int humidity_tenths_percent = 0;
+        bool pressure_valid = false;
+        int pressure_tenths_hpa = 0;
+        bool illuminance_valid = false;
+        int illuminance_lux = 0;
+        std::string light_level = "unavailable";
+    };
+
+    bool Initialize(i2c_master_bus_handle_t bus, std::mutex& bus_mutex, uint8_t address, int width,
+                    int height, bool flip_180);
+    bool Configure(const Config& config);
+    Config GetConfig() const;
+    uint8_t GetEffectiveContrast() const;
+    bool SetRuntimeContrast(uint8_t contrast);
+    uint8_t GetPageCount() const;
+    void UpdateTelemetry(const Telemetry& telemetry);
+    void SetEqualizerActive(bool active);
+    void UpdateEqualizer(bool active, const EqualizerBars& bars = {}, const EqualizerBars& peaks = {});
+    bool IsEqualizerActive() const { return equalizer_active_; }
+    void ShowTemporaryText(const std::string& text);
+    void ClearTemporaryText();
+    void Tick();
+    bool IsAvailable() const { return panel_ != nullptr; }
+
+private:
+    enum class EventType : uint8_t {
+        kNone,
+        kCliff,
+        kLowBattery,
+        kNetwork,
+        kGyroTurn,
+        kCalibration,
+        kTemporaryText,
+        kGesture,
+    };
+
+    enum class FontSize : uint8_t {
+        kMicro,
+        kCompact,
+        kRegular,
+        kEmphasis,
+    };
+
+    static const uint8_t* Glyph(char character);
+    static int FontWidth(FontSize font);
+    static int FontHeight(FontSize font);
+    static int MeasureTextWidth(const std::string& text, FontSize font);
+    static bool HasNonAscii(const std::string& text);
+    static int MeasureNotoTextWidth(const std::string& text);
+    static int MeasureTemporaryTextWidth(const std::string& text);
+    static FontSize SelectSingleLineFont(const std::string& text, int width, int height,
+                                         FontSize preferred);
+    static FontSize SelectTwoLineFont(const std::string& first, const std::string& second,
+                                      int width, int height, FontSize preferred);
+    void Clear();
+    void DrawBitmap(int x, int y, const uint8_t* bitmap, int width, int height);
+    void DrawHorizontalLine(int x, int y, int width);
+    void DrawIconTextFitted(int x, int y, int width, int height, const uint8_t* icon,
+                            const std::string& text, FontSize preferred, bool allow_icon,
+                            int icon_text_offset = 12);
+    void DrawIconTwoLinesFitted(int x, int y, int width, int height, const uint8_t* icon,
+                                const std::string& first, const std::string& second,
+                                FontSize preferred, bool allow_icon,
+                                int icon_text_offset = 12);
+    void DrawEventMessageFitted(const uint8_t* icon, const std::string& first,
+                                const std::string& second);
+    void DrawText(int x, int y, const std::string& text, FontSize font, int max_width);
+    void DrawNotoText(int x, int y, const std::string& text, int max_width);
+    void DrawNotoTextFitted(int x, int y, int width, int height, const std::string& text);
+    void DrawTemporaryText(int x, int y, const std::string& text);
+    void DrawTextFitted(int x, int y, int width, int height, const std::string& text,
+                        FontSize preferred = FontSize::kRegular, bool center_horizontal = true);
+    void DrawTwoLinesFitted(int x, int y, int width, int height, const std::string& first,
+                            const std::string& second,
+                            FontSize preferred = FontSize::kCompact,
+                            bool center_horizontal = true);
+    void DrawVerticalLine(int x, int y, int height);
+    EventType ActiveEventLocked(int64_t now_us) const;
+    void RebuildLayoutLocked();
+    void RenderDashboardLocked();
+    void RenderFaceLocked();
+    void RenderEnvironmentSingleLineWidgetLocked(
+        const secondary_oled_layout::Placement& placement, const WidgetConfig& widget);
+    void RenderEnvironmentWidgetLocked(const secondary_oled_layout::Placement& placement,
+                                       const WidgetConfig& widget);
+    void RenderEventLocked(EventType event);
+    void RenderEqualizerLocked();
+    void RenderLocked();
+    void RenderSingleLineWidgetLocked(const secondary_oled_layout::Placement& placement,
+                                      const WidgetConfig& widget);
+    void RenderTemporaryTextLocked();
+    void RenderWidgetLocked(const secondary_oled_layout::Placement& placement);
+    void SetPixel(int x, int y);
+    bool Flush();
+
+    i2c_master_bus_handle_t bus_ = nullptr;
+    std::mutex* bus_mutex_ = nullptr;
+    esp_lcd_panel_io_handle_t io_ = nullptr;
+    esp_lcd_panel_handle_t panel_ = nullptr;
+    int width_ = 0;
+    int height_ = 0;
+    bool flip_180_ = false;
+    int contrast_ = -1;
+    unsigned consecutive_flush_failures_ = 0;
+    Config config_;
+    secondary_oled_layout::Layout layout_;
+    RoboEyesFaceRenderer face_renderer_;
+    Telemetry telemetry_;
+    uint8_t current_page_ = 0;
+    int64_t next_page_at_us_ = 0;
+    int64_t gesture_event_until_us_ = 0;
+    int64_t low_battery_event_until_us_ = 0;
+    bool previous_low_battery_ = false;
+    std::string observed_gesture_;
+    std::string gesture_event_text_;
+    int low_battery_percent_ = 0;
+    int low_battery_voltage_mv_ = 0;
+    EventType active_event_ = EventType::kNone;
+    bool equalizer_active_ = false;
+    EqualizerBars equalizer_bars_{};
+    EqualizerBars equalizer_peaks_{};
+    bool dirty_ = true;
+    std::string temporary_text_;
+    int temporary_text_width_ = 0;
+    int64_t temporary_text_marquee_started_at_us_ = 0;
+    mutable std::mutex mutex_;
+    std::array<uint8_t, 128 * 64 / 8> framebuffer_ = {};
+};

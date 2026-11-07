@@ -1,0 +1,1497 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
+    />
+    <meta name="theme-color" content="#0b0906" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <title>DuongBot Control</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <div class="app-shell">
+        <aside class="sidebar">
+          <a class="brand" href="#overview" aria-label="DuongBot Control">
+            <span class="brand-mark" aria-hidden="true">
+              <span></span><span></span>
+            </span>
+            <span>
+              <strong>DuongBot</strong>
+              <small>Tạo bởi Dương</small>
+            </span>
+          </a>
+          <nav class="tab-nav" role="tablist" aria-label="Control sections">
+            <button type="button" role="tab" data-tab="overview" aria-label="Overview"><span class="tab-index">01</span><span class="tab-label">Overview</span></button>
+            <button type="button" role="tab" data-tab="control" aria-label="Control"><span class="tab-index">02</span><span class="tab-label">Control</span></button>
+            <button type="button" role="tab" data-tab="chat" aria-label="Chat"><span class="tab-index">03</span><span class="tab-label">Chat</span></button>
+            <button type="button" role="tab" data-tab="camera" aria-label="Camera"><span class="tab-index">04</span><span class="tab-label">Camera</span></button>
+            <button type="button" role="tab" data-tab="device" aria-label="Device"><span class="tab-index">05</span><span class="tab-label">Device</span></button>
+            <button type="button" role="tab" data-tab="diagnostics" aria-label="Diagnostics"><span class="tab-index">06</span><span class="tab-label">Diagnostics</span></button>
+          </nav>
+          <div class="sidebar-footer">
+            <section class="sidebar-status" aria-label="Live device status">
+              <div class="sidebar-status-head">
+                <strong><i></i>Live device</strong><b id="sidebarState">—</b>
+              </div>
+              <div class="sidebar-resource">
+                <div>
+                  <span>Internal RAM</span><b id="sidebarSram">—</b>
+                </div>
+                <div class="sidebar-meter"><i id="sidebarSramBar"></i></div>
+              </div>
+              <div class="sidebar-resource">
+                <div>
+                  <span>PSRAM</span><b id="sidebarPsram">—</b>
+                </div>
+                <div class="sidebar-meter"><i id="sidebarPsramBar"></i></div>
+              </div>
+              <div class="sidebar-address">
+                <span>Local address</span><b id="sidebarIp">—</b>
+              </div>
+            </section>
+            <section class="sidebar-runtime" aria-label="Firmware runtime">
+              <div class="sidebar-runtime-head">
+                <strong>Runtime</strong><b id="sidebarUptime">—</b>
+              </div>
+              <div class="sidebar-runtime-build">
+                <span>Firmware build</span><b id="sidebarVersion">—</b>
+              </div>
+            </section>
+          </div>
+        </aside>
+        <section class="workspace">
+          <header class="app-header">
+            <div>
+              <div class="app-header-kicker">DUONGBOT AI · DuongBot v1.0</div>
+              <strong>DuongBot Control</strong>
+            </div>
+            <div id="online" class="online"><i></i><span>Connecting</span></div>
+          </header>
+          <div class="page-header">
+            <div class="page-heading">
+              <div id="pageKicker" class="page-kicker">System snapshot</div>
+              <h1 id="pageTitle">Overview</h1>
+              <p id="pageDescription" class="page-description">
+                Live health and essential robot actions.
+              </p>
+            </div>
+          </div>
+          <div class="dashboard">
+        <div class="column left-column">
+          <section class="card" data-tabs="overview">
+            <div class="section-title">
+              <strong data-caption="Connectivity, memory, and vision">Health</strong><span id="version">—</span>
+            </div>
+            <div class="device-grid">
+              <div class="device-row">
+                <span>Network</span><b id="ssid">—</b>
+              </div>
+              <div class="device-row">
+                <span>Signal</span><b id="rssi">—</b>
+              </div>
+              <div class="device-row">
+                <span>IP address</span><b id="ip">—</b>
+              </div>
+              <div class="device-row">
+                <span>Server</span><b id="serverConnection">—</b>
+              </div>
+              <div class="device-row">
+                <span>Reset reason</span><b id="resetReason">—</b>
+              </div>
+              <div class="device-row">
+                <span>Internal RAM · free / total / low</span><b id="sram">—</b>
+              </div>
+              <div class="device-row">
+                <span>PSRAM · free / total</span><b id="psram">—</b>
+              </div>
+              <div class="device-row">
+                <span>Camera health</span><b id="cameraHealth">—</b>
+              </div>
+              <div class="device-row wide">
+                <span>Last vision request</span><b id="cameraLastRequest">Never</b>
+              </div>
+            </div>
+          </section>
+          <section class="card resource-card" data-tabs="overview">
+            <div class="section-title">
+              <strong data-caption="Live heap and network pressure">Resources</strong
+              ><span>Live</span>
+            </div>
+            <div class="resource-summary">
+              <div class="resource-summary-item">
+                <span>Internal RAM · free / total</span><b id="overviewInternalValue">—</b
+                ><small id="overviewInternalLow">Waiting for device</small>
+              </div>
+              <div class="resource-summary-item">
+                <span>PSRAM · free / total</span><b id="overviewPsramValue">—</b
+                ><small>Camera, UI, and image buffers</small>
+              </div>
+              <div class="resource-summary-item">
+                <span>Wi-Fi signal</span><b id="overviewWifiValue">—</b
+                ><small id="overviewWifiQuality">Waiting for device</small>
+              </div>
+            </div>
+            <div class="resource-meters">
+              <div class="resource-meter">
+                <div><span>Internal memory pressure</span><b id="overviewInternalPercent">—</b></div>
+                <div class="resource-track"><i id="overviewInternalBar"></i></div>
+              </div>
+              <div class="resource-meter">
+                <div><span>PSRAM pressure</span><b id="overviewPsramPercent">—</b></div>
+                <div class="resource-track"><i id="overviewPsramBar"></i></div>
+              </div>
+              <div class="resource-meter">
+                <div><span>Wi-Fi link quality</span><b id="overviewWifiPercent">—</b></div>
+                <div class="resource-track signal"><i id="overviewWifiBar"></i></div>
+              </div>
+            </div>
+          </section>
+          <section class="card overview-telemetry" data-tabs="overview">
+            <div class="section-title">
+              <strong data-caption="Motion, power, and room telemetry">Live robot snapshot</strong
+              ><span>Slow refresh</span>
+            </div>
+            <div class="overview-stats">
+              <div class="overview-stat">
+                <span>Assistant</span><b id="overviewAssistant">—</b
+                ><small>Current session state</small>
+              </div>
+              <div class="overview-stat">
+                <span>Uptime</span><b id="overviewUptime">—</b
+                ><small>Since the last restart</small>
+              </div>
+              <div class="overview-stat">
+                <span>Battery</span><b id="overviewBattery">Checking</b
+                ><small>INA219 state of charge</small>
+              </div>
+              <div class="overview-stat">
+                <span>Current · power</span><b id="overviewPower">—</b
+                ><small>Live energy flow</small>
+              </div>
+              <div class="overview-stat">
+                <span>Floor distance</span><b id="overviewDistance">Checking</b
+                ><small>Downward cliff sensor</small>
+              </div>
+              <div class="overview-stat">
+                <span>Room climate</span><b id="overviewClimate">Checking</b
+                ><small>AHT20 temperature · humidity</small>
+              </div>
+              <div class="overview-stat">
+                <span>Pressure</span><b id="overviewPressure">Checking</b
+                ><small>BMP280 atmosphere</small>
+              </div>
+              <div class="overview-stat">
+                <span>Ambient light</span><b id="overviewLight">Checking</b
+                ><small>BH1750 illuminance</small>
+              </div>
+            </div>
+          </section>
+          <section
+            class="card environment-card"
+            data-tabs="device"
+            data-lane-device="0"
+            data-order-device="20"
+          >
+            <div class="section-title">
+              <strong data-caption="Ambient sensors">Environment</strong
+              ><span id="environmentSummary">Waiting</span>
+            </div>
+            <div class="status">
+              <div class="metric wide">
+                <div class="label">AHT20 · temperature &amp; humidity</div>
+                <div class="value" id="aht20Status">Checking</div>
+              </div>
+              <div class="metric wide">
+                <div class="label">BMP280 · pressure</div>
+                <div class="value" id="bmp280Status">Checking</div>
+              </div>
+              <div class="metric wide">
+                <div class="label">BH1750 · illuminance</div>
+                <div class="value" id="bh1750Status">Checking</div>
+              </div>
+              <div class="metric wide">
+                <div class="label">Acoustic · INMP441</div>
+                <div class="value" id="acousticStatus">Checking</div>
+                <div class="value acoustic-floor" id="acousticFloorStatus" hidden></div>
+              </div>
+            </div>
+          </section>
+          <section
+            class="card"
+            data-tabs="control"
+            data-lane-control="1"
+            data-order-control="20"
+          >
+            <div class="section-title">
+              <strong data-caption="Motion and safety telemetry">Robot status</strong><span id="uptime">—</span>
+            </div>
+            <div class="status">
+              <div class="metric">
+                <div class="label">Assistant</div>
+                <div class="value" id="state">—</div>
+              </div>
+              <div class="metric">
+                <div class="label">Camera</div>
+                <div class="value" id="camera">—</div>
+              </div>
+              <div class="metric">
+                <div class="label">Floor distance</div>
+                <div class="value" id="distance">—</div>
+              </div>
+              <div class="metric">
+                <div class="label">Cliff sensor</div>
+                <div class="value" id="rangeState">Checking</div>
+              </div>
+              <div class="metric">
+                <div class="label">Battery</div>
+                <div class="value" id="battery">Checking</div>
+              </div>
+              <div class="metric">
+                <div class="label">Current · power</div>
+                <div class="value" id="power">—</div>
+              </div>
+              <div class="metric wide">
+                <div class="label">Motion sensor</div>
+                <div class="value" id="motionSensor">Checking</div>
+              </div>
+              <div class="metric wide">
+                <div class="label">Secondary OLED</div>
+                <div class="value health" id="oledState">
+                  <i class="dot"></i><span>Checking</span>
+                </div>
+              </div>
+            </div>
+            <div class="capacity-test">
+              <div class="capacity-result">
+                <b id="capacityResult">0.0 mAh</b
+                ><small id="capacityState">Capacity test not started</small
+                ><small id="socState">SoC waiting for INA219</small>
+              </div>
+              <div class="capacity-buttons">
+                <button id="capacityStart">Start</button
+                ><button id="capacityStop">Stop</button
+                ><button id="capacityReset" class="reset">Reset</button>
+              </div>
+            </div>
+            <div class="threshold">
+              <div class="threshold-head">
+                <span>Cliff threshold</span><b id="cliffValue">150 mm</b>
+              </div>
+              <input
+                id="cliffThreshold"
+                type="range"
+                min="50"
+                max="500"
+                step="5"
+                value="150"
+              />
+            </div>
+            <div
+              class="segment-toggles"
+              style="margin-top: 11px; grid-template-columns: 1fr 1fr"
+            >
+              <label class="toggle"
+                ><input id="motionEmotions" type="checkbox" checked />MPU face
+                reactions</label
+              ><label class="toggle"
+                ><input id="emotionMovement" type="checkbox" />Emotion
+                movement</label
+              >
+            </div>
+          </section>
+          <section class="card" data-tabs="chat" data-order-chat="20">
+            <div class="section-title">
+              <strong data-caption="Recognition provider">ASR</strong><span id="asrStatus">Checking</span>
+            </div>
+            <div class="display-settings">
+              <label class="field">
+                <span>ASR provider</span>
+                <select id="asrProvider">
+                  <option value="xiaozhi">Xiaozhi ASR</option>
+                  <option value="gemini">Gemini ASR</option>
+                </select>
+              </label>
+              <label class="field wide">
+                <span>Gemini API key</span>
+                <input
+                  id="geminiApiKey"
+                  class="text-input"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="Leave blank to keep saved key"
+                />
+              </label>
+            </div>
+            <div class="asr-actions">
+              <button id="saveAsr" class="log-button">Save Gemini key</button>
+              <button id="clearGeminiKey" class="log-button">
+                Clear Gemini key
+              </button>
+            </div>
+            <p class="asr-note">
+              Provider switches are saved immediately and apply from the next
+              listening turn. The API key is saved separately.
+            </p>
+          </section>
+          <section class="card" data-tabs="chat" data-order-chat="30">
+            <div class="section-title">
+              <strong data-caption="Bootstrap endpoint">Xiaozhi server</strong><span id="serverStatus">Checking</span>
+            </div>
+            <label class="field">
+              <span>Bootstrap / OTA endpoint</span>
+              <input
+                id="serverUrl"
+                class="text-input"
+                type="url"
+                inputmode="url"
+                maxlength="512"
+                autocomplete="off"
+                placeholder="http://local-server:12800/xiaozhi/ota"
+              />
+            </label>
+            <div class="asr-actions">
+              <button id="saveServer" class="log-button">Save &amp; restart</button>
+              <button id="defaultServer" class="log-button">Use default</button>
+            </div>
+            <p class="asr-note">
+              The robot reloads MQTT/WebSocket configuration from this endpoint after restart.
+              Wi-Fi credentials are not changed.
+            </p>
+          </section>
+          <section
+            class="card"
+            data-tabs="control"
+            data-lane-control="0"
+            data-order-control="30"
+          >
+            <div class="section-title">
+              <strong data-caption="Mochan face preview">Emotions</strong><span>5-second preview</span>
+            </div>
+            <div class="emotion-grid">
+              <button class="emotion" data-emotion="neutral">Neutral</button
+              ><button class="emotion" data-emotion="happy">Happy</button
+              ><button class="emotion" data-emotion="bored">Bored</button
+              ><button class="emotion" data-emotion="laughing">Laughing</button
+              ><button class="emotion" data-emotion="funny">Funny</button
+              ><button class="emotion" data-emotion="sad">Sad</button
+              ><button class="emotion" data-emotion="angry">Angry</button
+              ><button class="emotion" data-emotion="crying">Crying</button
+              ><button class="emotion" data-emotion="loving">Loving</button
+              ><button class="emotion" data-emotion="embarrassed">
+                Embarrassed</button
+              ><button class="emotion" data-emotion="surprised">
+                Surprised</button
+              ><button class="emotion" data-emotion="shocked">Shocked</button
+              ><button class="emotion" data-emotion="thinking">Thinking</button
+              ><button class="emotion" data-emotion="winking">Winking</button
+              ><button class="emotion" data-emotion="cool">Cool</button
+              ><button class="emotion" data-emotion="relaxed">Relaxed</button
+              ><button class="emotion" data-emotion="delicious">
+                Delicious</button
+              ><button class="emotion" data-emotion="kissy">Kissy</button
+              ><button class="emotion" data-emotion="confident">
+                Confident</button
+              ><button class="emotion" data-emotion="sleepy">Sleepy</button
+              ><button class="emotion" data-emotion="silly">Silly</button
+              ><button class="emotion" data-emotion="confused">Confused</button
+              ><button class="emotion" data-emotion="suspicious">
+                Suspicious</button
+              ><button class="emotion" data-emotion="shake">Shake</button>
+            </div>
+            <details id="faceGeometryEditor" class="face-geometry-editor">
+              <summary>
+                <span>Customize Geometry</span><b id="faceGeometryState">Not loaded</b>
+              </summary>
+              <div class="face-geometry-toolbar">
+                <label>Emotion<select id="faceGeometryEmotion"></select></label>
+                <span id="faceGeometryHint">Open the editor to load geometry.</span>
+              </div>
+              <div class="face-geometry-workspace">
+                <canvas id="faceGeometryCanvas" width="240" height="240"
+                  aria-label="Local Mochan face geometry preview"></canvas>
+                <div class="face-geometry-controls">
+                  <fieldset><legend>Left Eye</legend><div id="faceGeometryLeft"></div></fieldset>
+                  <fieldset><legend>Right Eye</legend><div id="faceGeometryRight"></div></fieldset>
+                  <fieldset><legend>Mouth</legend><div id="faceGeometryMouth"></div></fieldset>
+                </div>
+              </div>
+              <div class="face-geometry-actions">
+                <button id="faceGeometrySave" class="log-button" type="button">Save</button>
+                <button id="faceGeometryReset" class="log-button" type="button">Reset current emotion</button>
+                <button id="faceGeometryResetAll" class="log-button danger" type="button">Reset All</button>
+              </div>
+            </details>
+          </section>
+          <section
+            class="card"
+            data-tabs="control"
+            data-lane-control="0"
+            data-order-control="35"
+          >
+            <div class="section-title">
+              <strong data-caption="Coordinated face, light, OLED, and motion">Reactions</strong
+              ><div class="reaction-head-status">
+                <span id="reactionState">Idle</span>
+                <button id="reactionCancel" class="reaction-cancel" type="button" hidden>
+                  Cancel
+                </button>
+              </div>
+            </div>
+            <div class="reaction-grid">
+              <button class="reaction-tile" data-reaction="acknowledge">Acknowledge</button
+              ><button class="reaction-tile" data-reaction="success">Success</button
+              ><button class="reaction-tile" data-reaction="celebrate">Celebrate</button
+              ><button class="reaction-tile" data-reaction="thinking">Thinking</button
+              ><button class="reaction-tile" data-reaction="curious">Curious</button
+              ><button class="reaction-tile" data-reaction="confused">Confused</button
+              ><button class="reaction-tile" data-reaction="warning">Warning</button
+              ><button class="reaction-tile" data-reaction="error">Error</button
+              ><button class="reaction-tile" data-reaction="startled">Startled</button
+              ><button class="reaction-tile" data-reaction="sleepy">Sleepy</button
+              ><button class="reaction-tile" data-reaction="nope">Nope</button
+              ><button class="reaction-tile" data-reaction="attention">Attention</button>
+            </div>
+            <div class="reaction-duration">
+              <span>Duration</span>
+              <div class="reaction-duration-presets">
+                <button class="reaction-duration-preset" type="button" data-reaction-duration="1000">1s</button>
+                <button class="reaction-duration-preset on" type="button" data-reaction-duration="3000">3s</button>
+                <button class="reaction-duration-preset" type="button" data-reaction-duration="5000">5s</button>
+                <button class="reaction-duration-preset" type="button" data-reaction-duration="custom">Custom</button>
+              </div>
+              <div id="reactionCustomDuration" class="reaction-custom-duration" hidden>
+                <input id="reactionDuration" type="range" min="250" max="30000" step="250" value="3000" />
+                <span id="reactionDurationLabel">3.0 s</span>
+              </div>
+            </div>
+            <label class="reaction-oled">
+              <span>OLED text <small>optional</small></span>
+              <input id="reactionOledText" class="text-input" type="text" maxlength="48" autocomplete="off" placeholder="Temporary OLED message" />
+            </label>
+            <div class="reaction-runtime">
+              <div class="reaction-runtime-item"><span>Face</span><b id="reactionFace">neutral</b></div>
+              <div class="reaction-runtime-item"><span>Light</span><b id="reactionLight">idle</b></div>
+              <div class="reaction-runtime-item"><span>Motion</span><b id="reactionMotion">not requested</b></div>
+            </div>
+          </section>
+        </div>
+        <div class="column center-column">
+          <section
+            id="safety"
+            class="card safety"
+            data-tabs="control"
+            data-lane-control="0"
+            data-order-control="0"
+          >
+            <div>
+              <b>Table edge detected</b
+              ><small>Forward and turns are locked. Reverse only.</small>
+            </div>
+            <button data-stop>STOP</button>
+          </section>
+          <section
+            class="card"
+            data-tabs="control"
+            data-lane-control="0"
+            data-order-control="10"
+          >
+            <div class="section-title">
+              <strong data-caption="Direct motion control">Drive</strong
+              ><div class="drive-mode" role="group" aria-label="Drive control mode">
+                <button id="padMode" class="active" type="button">Pad</button
+                ><button id="joystickMode" type="button">Joystick</button>
+              </div>
+            </div>
+            <div id="padDrivePanel">
+              <div class="dpad">
+              <button
+                class="control rotate-left-90"
+                data-turn="-90"
+                data-label="90°"
+                aria-label="Rotate left 90 degrees"
+                title="Rotate left 90°"
+              >
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M7.4 6.4 6 5 2 9l4 4 1.4-1.4L5.8 10H13a5 5 0 1 1-4.6 7H6.2a7 7 0 1 0 6.8-9H5.8z"
+                  />
+                </svg></button
+              ><button
+                class="control up"
+                data-drive="forward"
+                aria-label="Forward"
+              >
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 4 4 12h5v8h6v-8h5z" />
+                </svg></button
+              ><button
+                class="control rotate-right-90"
+                data-turn="90"
+                data-label="90°"
+                aria-label="Rotate right 90 degrees"
+                title="Rotate right 90°"
+              >
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M7.4 6.4 6 5 2 9l4 4 1.4-1.4L5.8 10H13a5 5 0 1 1-4.6 7H6.2a7 7 0 1 0 6.8-9H5.8z"
+                  />
+                </svg></button
+              ><button class="control left" data-drive="left" aria-label="Left">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 4 4 12h5v8h6v-8h5z" />
+                </svg></button
+              ><button class="control stop" data-stop>STOP</button
+              ><button
+                class="control right"
+                data-drive="right"
+                aria-label="Right"
+              >
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 4 4 12h5v8h6v-8h5z" />
+                </svg></button
+              ><button
+                class="control rotate-left-180"
+                data-turn="-180"
+                data-label="180°"
+                aria-label="Rotate left 180 degrees"
+                title="Rotate left 180°"
+              >
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M7.4 6.4 6 5 2 9l4 4 1.4-1.4L5.8 10H13a5 5 0 1 1-4.6 7H6.2a7 7 0 1 0 6.8-9H5.8z"
+                  />
+                </svg></button
+              ><button
+                class="control down"
+                data-drive="backward"
+                aria-label="Backward"
+              >
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 4 4 12h5v8h6v-8h5z" />
+                </svg></button
+              ><button
+                class="control rotate-right-180"
+                data-turn="180"
+                data-label="180°"
+                aria-label="Rotate right 180 degrees"
+                title="Rotate right 180°"
+              >
+                <svg viewBox="0 0 24 24">
+                  <path
+                    d="M7.4 6.4 6 5 2 9l4 4 1.4-1.4L5.8 10H13a5 5 0 1 1-4.6 7H6.2a7 7 0 1 0 6.8-9H5.8z"
+                  />
+                </svg>
+              </button>
+              </div>
+              <div class="range-row">
+                <span>50 ms</span
+                ><input
+                  id="duration"
+                  type="range"
+                  min="50"
+                  max="5000"
+                  step="50"
+                  value="250"
+                /><span id="durationLabel">250 ms</span>
+              </div>
+            </div>
+            <div id="joystickDrivePanel" class="joystick-panel" hidden>
+              <div
+                id="joystick"
+                class="joystick"
+                role="application"
+                aria-label="Robot drive joystick"
+              >
+                <div id="joystickKnob" class="joystick-knob"></div>
+              </div>
+              <div class="joystick-output">
+                <span>Drag to drive · release to stop</span
+                ><b id="joystickOutput">L 0% · R 0%</b>
+              </div>
+            </div>
+            <div class="range-row" style="margin-top: 12px">
+              <span>Speed</span
+              ><input
+                id="motorSpeed"
+                type="range"
+                min="55"
+                max="100"
+                step="5"
+                value="100"
+              /><span id="motorSpeedValue">100%</span>
+            </div>
+            <div class="motor-state">
+              <span>Motion <b id="motion">Stopped</b></span
+              ><span>Queue <b id="queue">0</b></span
+              ><span>Time <b id="motorTime">0 ms</b></span>
+            </div>
+            <div class="progress"><i id="danceProgress"></i></div>
+            <p class="hint drive-hint">
+              Local network only · tap a direction to run for the selected time ·
+              STOP cancels
+            </p>
+          </section>
+          <section
+            class="card"
+            data-tabs="device"
+            data-lane-device="0"
+            data-order-device="10"
+          >
+            <div class="section-title">
+              <strong data-caption="Speaker, displays, and illumination">Output &amp; lighting</strong>
+            </div>
+            <div class="audio-row">
+              <span class="audio-name"
+                ><b>Speaker</b><small>Output volume</small></span
+              ><input
+                id="speakerVolume"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value="70"
+              /><span class="audio-value" id="speakerValue">70%</span>
+            </div>
+            <div class="audio-row microphone-toggle-row">
+              <span class="audio-name"
+                ><b>Ambient sounds</b><small>Occasional idle personality cues</small></span
+              ><label class="toggle"
+                ><input id="ambientSound" type="checkbox" /><span>Enabled</span></label
+              >
+            </div>
+            <div class="audio-row screen-brightness-row">
+              <span class="audio-name"
+                ><b>Screen</b><small>Backlight</small></span
+              ><input
+                id="screenBrightness"
+                type="range"
+                min="10"
+                max="100"
+                step="5"
+                value="75"
+              /><span class="audio-value" id="screenValue">75%</span
+              ><label class="toggle brightness-auto"
+                ><input id="autoBrightness" type="checkbox" /><span class="brightness-auto-long"
+                  >Automatic brightness</span
+                ><span class="brightness-auto-short">Auto</span></label
+              >
+            </div>
+            <div class="audio-row">
+              <span class="audio-name"
+                ><b>Auto minimum</b><small>Dark-room floor</small></span
+              ><input
+                id="autoBrightnessMinimum"
+                type="range"
+                min="10"
+                max="100"
+                step="5"
+                value="15"
+              /><span class="audio-value" id="autoBrightnessMinimumValue">15%</span>
+            </div>
+            <div class="audio-row">
+              <span class="audio-name"
+                ><b>Auto maximum</b><small>Bright-room ceiling</small></span
+              ><input
+                id="autoBrightnessMaximum"
+                type="range"
+                min="10"
+                max="100"
+                step="5"
+                value="85"
+              /><span class="audio-value" id="autoBrightnessMaximumValue">85%</span>
+            </div>
+            <div class="audio-row microphone-toggle-row">
+              <span class="audio-name"
+                ><b>Desk mode</b><small id="deskModeState">Idle clock presentation</small></span
+              ><label class="toggle"
+                ><input id="deskMode" type="checkbox" checked /><span>Enabled</span></label
+              >
+            </div>
+            <div class="audio-row">
+              <span class="audio-name"
+                ><b>Enter after</b><small>Continuous idle time</small></span
+              ><input
+                id="deskModeDelay"
+                type="range"
+                min="10"
+                max="600"
+                step="10"
+                value="180"
+              /><span class="audio-value" id="deskModeDelayValue">180 s</span>
+            </div>
+            <div class="audio-row microphone-toggle-row">
+              <span class="audio-name"
+                ><b>24-hour clock</b><small>Disable for AM / PM</small></span
+              ><label class="toggle"
+                ><input id="deskMode24Hour" type="checkbox" checked /><span>24h</span></label
+              >
+            </div>
+            <div class="audio-row">
+              <span class="audio-name"
+                ><b>Status light</b><small>Edison LED · GPIO19</small></span
+              ><input
+                id="statusLightBrightness"
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value="100"
+              /><span class="audio-value" id="statusLightValue">100%</span>
+            </div>
+          </section>
+          <section
+            class="card microphone-card"
+            data-tabs="device"
+            data-lane-device="0"
+            data-order-device="15"
+          >
+            <div class="section-title">
+              <strong data-caption="Voice input · INMP441">Microphone</strong
+              ><span id="microphoneProfileState">Legacy</span>
+            </div>
+            <div class="audio-row microphone-select-row">
+              <span class="audio-name"><b>Profile</b><small>Voice conditioning preset</small></span>
+              <div class="microphone-profile-select">
+                <button
+                  id="microphoneProfile"
+                  class="microphone-profile-trigger"
+                  type="button"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                  aria-controls="microphoneProfileMenu"
+                >
+                  <span id="microphoneProfileLabel">Legacy</span>
+                  <span class="microphone-profile-chevron" aria-hidden="true"></span>
+                </button>
+                <div
+                  id="microphoneProfileMenu"
+                  class="microphone-profile-menu"
+                  role="listbox"
+                  aria-label="Microphone profile"
+                  hidden
+                >
+                  <div class="microphone-profile-option" role="option" data-value="legacy"
+                    aria-selected="true" tabindex="-1">Legacy</div>
+                  <div class="microphone-profile-option" role="option" data-value="near"
+                    aria-selected="false" tabindex="-1">Near</div>
+                  <div class="microphone-profile-option" role="option" data-value="balanced"
+                    aria-selected="false" tabindex="-1">Balanced</div>
+                  <div class="microphone-profile-option" role="option" data-value="far"
+                    aria-selected="false" tabindex="-1">Far</div>
+                  <div class="microphone-profile-option" role="option" data-value="noisy"
+                    aria-selected="false" tabindex="-1">Noisy</div>
+                  <div class="microphone-profile-option" role="option" data-value="custom"
+                    aria-selected="false" tabindex="-1">Custom</div>
+                </div>
+              </div>
+            </div>
+            <div class="audio-row">
+              <span class="audio-name"><b>Voice gain</b><small>WakeNet and ASR only</small></span
+              ><input id="microphoneVoiceGain" type="range" min="-12" max="12" step="1" value="0"
+              /><span class="audio-value" id="microphoneVoiceGainValue">0 dB</span>
+            </div>
+            <div class="audio-row microphone-toggle-row">
+              <span class="audio-name"><b>Noise suppression</b><small id="microphoneNsState">Off</small></span
+              ><label class="toggle"><input id="microphoneNs" type="checkbox" />Enable</label>
+            </div>
+            <div class="audio-row microphone-toggle-row">
+              <span class="audio-name"><b>AGC</b><small id="microphoneAgcState">Off</small></span
+              ><label class="toggle"><input id="microphoneAgc" type="checkbox" />Enable</label>
+            </div>
+            <div class="audio-row microphone-advanced-row">
+              <span class="audio-name"><b>Capture trim</b><small>Advanced · raw input scale</small></span
+              ><input id="microphoneCaptureTrim" type="range" min="-24" max="0" step="1" value="0"
+              /><span class="audio-value" id="microphoneCaptureTrimValue">0 dB</span>
+            </div>
+            <div class="audio-row microphone-toggle-row">
+              <span class="audio-name"><b>Mute</b><small>Disable microphone input</small></span
+              ><label class="toggle"><input id="microphoneMute" type="checkbox" />Muted</label>
+            </div>
+            <div class="audio-row microphone-level-row">
+              <span class="audio-name"><b>Input level</b><small>Raw capture VU</small></span>
+              <div class="vu-wrap">
+                <div class="vu"><i id="micLevel"></i></div>
+                <span class="clip" id="micClip">LIVE</span>
+              </div>
+            </div>
+            <div class="microphone-diagnostics">
+              <div><span>Raw input</span><b id="microphoneRawLevel">Unavailable</b></div>
+              <div><span>Voice pre-AFE</span><b id="microphoneVoiceLevel">Unavailable</b></div>
+              <div><span>AFE output</span><b id="microphoneAfeLevel">Unavailable</b></div>
+            </div>
+            <p class="hint microphone-restart" id="microphoneRestart" hidden>
+              Restart required to apply voice processing changes.
+            </p>
+          </section>
+          <section
+            class="card"
+            data-tabs="device"
+            data-lane-device="1"
+            data-order-device="30"
+          >
+            <div class="section-title">
+              <strong data-caption="Mochan and secondary OLED">Displays</strong><span>Saved automatically</span>
+            </div>
+            <div class="display-actions">
+              <button
+                class="action"
+                id="displayFlip"
+                data-action="display_flip"
+              >
+                <span class="icon">↕</span
+                ><span
+                  ><b>Main display</b><small>Rotate 180°</small></span
+                ></button
+              ><button class="action" id="oledFlip" data-action="oled_flip">
+                <span class="icon">↕</span
+                ><span><b>Secondary OLED</b><small>Rotate 180°</small></span>
+              </button>
+            </div>
+            <div class="threshold">
+              <div class="threshold-head">
+                <span>OLED contrast · manual / fallback</span
+                ><b id="oledContrastValue">50%</b>
+              </div>
+              <input
+                id="oledContrast"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="50"
+              />
+            </div>
+            <div class="audio-row oled-auto-contrast-row">
+              <span class="audio-name"
+                ><b>OLED auto contrast</b><small>BH1750 ambient light</small></span
+              ><span class="audio-value" id="oledEffectiveContrast">—</span
+              ><label class="toggle brightness-auto"
+                ><input id="oledAutoContrast" type="checkbox" /><span
+                  class="brightness-auto-long">Automatic contrast</span
+                ><span class="brightness-auto-short">Auto</span></label
+              >
+            </div>
+            <div class="audio-row">
+              <span class="audio-name"
+                ><b>OLED auto minimum</b><small>Dark-room floor</small></span
+              ><input
+                id="oledAutoContrastMinimum"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="19"
+              /><span class="audio-value" id="oledAutoContrastMinimumValue">19%</span>
+            </div>
+            <div class="audio-row">
+              <span class="audio-name"
+                ><b>OLED auto maximum</b><small>Bright-room ceiling</small></span
+              ><input
+                id="oledAutoContrastMaximum"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="88"
+              /><span class="audio-value" id="oledAutoContrastMaximumValue">88%</span>
+            </div>
+            <div class="display-settings">
+              <div class="oled-designer">
+                <button
+                  id="oledPreviewToggle"
+                  class="oled-preview-head oled-preview-toggle"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="oledPreview"
+                >
+                  <span><i>›</i> Layout preview</span><b id="oledPageCount">—</b>
+                </button>
+                <div id="oledPreview" class="oled-pages" hidden>
+                  <div class="oled-empty">Waiting for OLED configuration</div>
+                </div>
+                <div class="oled-preview-head">
+                  <span>Widgets · display order</span
+                  ><span>Use arrows to reorder</span>
+                </div>
+                <div id="oledWidgets" class="oled-widget-list"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="column right-column">
+          <div class="control-stack">
+            <section
+              class="card conversation-card"
+              data-tabs="chat"
+              data-order-chat="10"
+            >
+              <div class="conversation-head">
+                <strong data-caption="Typed or spoken assistant session">Conversation</strong>
+                <div class="conversation-actions">
+                  <span id="chatState" class="chat-state">Ready</span
+                  ><button
+                    id="chatCamera"
+                    class="chat-clear"
+                    title="Ask Xiaozhi to take and describe an MCP photo"
+                  >
+                    &#128247; Photo
+                  </button
+                  ><button
+                    id="chatClear"
+                    class="chat-clear"
+                    title="Clear local conversation history"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div id="conversationHistory" class="conversation-history">
+                <div class="conversation-empty">
+                  Type or speak to chat with DuongBot
+                </div>
+              </div>
+              <div id="chatError" class="chat-error"></div>
+              <div class="chat-compose">
+                <textarea
+                  id="chatInput"
+                  class="chat-input"
+                  rows="1"
+                  placeholder="Message DuongBot…"
+                  aria-label="Chat message"
+                ></textarea
+                ><button id="chatSend" class="chat-send" disabled>Send</button>
+                <div class="chat-meta">
+                  <span>Enter to send · Shift+Enter for newline</span
+                  ><span id="chatCount" class="chat-count">0 / 512</span>
+                </div>
+              </div>
+            </section>
+            <section class="card" data-tabs="camera">
+              <div class="section-title">
+                <strong data-caption="Capture, preview, and sensor tuning">Browser camera</strong><span>VGA · JPEG</span>
+              </div>
+              <div class="camera-body">
+                <div id="snapshot" class="snapshot">
+                  <span>No snapshot yet</span
+                  ><img id="snapshotImage" alt="Camera snapshot" />
+                </div>
+                <div class="camera-copy">
+                  <p>
+                    Still capture or a continuous MJPEG browser preview. Live
+                    mode stops when the robot leaves Idle.
+                  </p>
+                  <div class="camera-buttons">
+                    <button id="takeSnapshot" class="mini-button">
+                      Take photo</button
+                    ><button id="browserLive" class="mini-button">Live</button
+                    ><button
+                      id="liveCamera"
+                      class="mini-button"
+                      data-action="live_camera"
+                    >
+                      Screen preview</button
+                    ><button
+                      id="cameraMirrorQuickAction"
+                      class="mini-button"
+                      data-action="camera_mirror"
+                    >
+                      Mirror camera</button
+                    ><button
+                      id="cameraFlip"
+                      class="mini-button"
+                      data-action="camera_flip"
+                    >
+                      Flip camera
+                    </button>
+                  </div>
+                  <div id="snapshotMeta" class="camera-meta">Camera ready</div>
+                </div>
+              </div>
+              <details class="camera-settings-panel">
+                <summary>Camera settings <span id="cameraSettingsSummary">OV3660 · Normal</span></summary>
+                <div class="camera-settings-grid">
+                  <label class="field"><span>Image profile</span><select id="cameraProfile">
+                    <option value="auto">Automatic · BH1750</option>
+                    <option value="normal">Normal</option><option value="low_light">Low light</option>
+                    <option value="custom">Custom</option>
+                  </select></label>
+                  <div></div>
+                  <div class="camera-settings-group"><b>Web stream</b></div>
+                  <label class="field"><span>Resolution</span><select id="cameraWebResolution">
+                    <option value="qvga">QVGA · 320×240</option><option value="hvga">HVGA · 480×320</option>
+                    <option value="vga">VGA · 640×480</option><option value="svga">SVGA · 800×600</option>
+                  </select></label>
+                  <label class="field"><span>JPEG quality · 4–63, lower is better</span><input id="cameraWebQuality" type="number" min="4" max="63" step="1" /></label>
+                  <label class="field"><span>FPS limit · 1–30</span><input id="cameraWebFps" type="number" min="1" max="30" step="1" /></label>
+                  <div class="camera-settings-group"><b>Screen preview</b></div>
+                  <label class="field"><span>Source resolution</span><select id="cameraMochanResolution">
+                    <option value="auto">Auto</option><option value="qvga">QVGA</option>
+                    <option value="hvga">HVGA</option><option value="vga">VGA</option>
+                  </select></label>
+                  <div class="camera-settings-group"><b>MCP photo</b></div>
+                  <label class="field"><span>Resolution</span><select id="cameraMcpResolution">
+                    <option value="vga">VGA · 640×480</option><option value="svga">SVGA · 800×600</option>
+                    <option value="xga">XGA · 1024×768</option><option value="sxga">SXGA · 1280×1024</option>
+                    <option value="uxga">UXGA · 1600×1200</option><option value="qxga">QXGA · 2048×1536</option>
+                    <option value="qsxga" disabled>QSXGA · 2560×1920 (unsupported by OV3660)</option>
+                  </select></label>
+                  <label class="field"><span>JPEG quality · 4–63, lower is better</span><input id="cameraMcpQuality" type="number" min="4" max="63" step="1" /></label>
+                  <label class="camera-check"><input id="cameraMcpFresh" type="checkbox" /><span>Fresh frame · AEC/AGC warm-up</span></label>
+                </div>
+                <details class="camera-advanced">
+                  <summary>Advanced sensor controls</summary>
+                  <div class="camera-advanced-groups">
+                    <section class="camera-control-group">
+                      <h4>Image tuning</h4>
+                      <div class="camera-settings-grid">
+                        <label class="field"><span>Brightness</span><select id="cameraBrightness"><option>-3</option><option>-2</option><option>-1</option><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+                        <label class="field"><span>Contrast</span><select id="cameraContrast"><option>-3</option><option>-2</option><option>-1</option><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+                        <label class="field wide"><span>Saturation</span><select id="cameraSaturation"><option>-4</option><option>-3</option><option>-2</option><option>-1</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+                      </div>
+                    </section>
+                    <section class="camera-control-group">
+                      <h4>Exposure</h4>
+                      <div class="camera-settings-grid">
+                        <div class="field camera-control-card">
+                          <div class="camera-field-heading"><label class="camera-field-title" for="cameraAeLevel">AE level</label><label class="camera-inline-check"><input id="cameraAec2" type="checkbox" /><span>AEC2</span></label></div>
+                          <select id="cameraAeLevel"><option>-5</option><option>-4</option><option>-3</option><option>-2</option><option>-1</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+                        </div>
+                        <div class="field camera-control-card">
+                          <div class="camera-field-heading"><label class="camera-field-title" for="cameraManualExposure">Manual exposure</label><label class="camera-inline-check"><input id="cameraAutoExposure" type="checkbox" /><span>Auto exposure</span></label></div>
+                          <input id="cameraManualExposure" type="number" min="0" max="1200" />
+                        </div>
+                      </div>
+                    </section>
+                    <section class="camera-control-group">
+                      <h4>Gain</h4>
+                      <div class="camera-settings-grid">
+                        <div class="field camera-control-card">
+                          <div class="camera-field-heading"><label class="camera-field-title" for="cameraManualGain">Manual gain</label><label class="camera-inline-check"><input id="cameraAutoGain" type="checkbox" /><span>Auto gain</span></label></div>
+                          <input id="cameraManualGain" type="number" min="0" max="64" />
+                        </div>
+                        <label class="field"><span>Gain ceiling</span><select id="cameraGainCeiling">
+                          <option>2</option><option>4</option><option>8</option><option>16</option>
+                          <option>32</option><option>64</option><option>128</option>
+                        </select></label>
+                      </div>
+                    </section>
+                    <section class="camera-control-group">
+                      <h4>White balance</h4>
+                      <div class="camera-settings-grid camera-settings-grid-single">
+                        <div class="field camera-control-card">
+                          <div class="camera-field-heading">
+                            <label class="camera-field-title" for="cameraWbMode">White balance mode</label>
+                            <div class="camera-field-options"><label class="camera-inline-check"><input id="cameraAwb" type="checkbox" /><span>Auto</span></label><label class="camera-inline-check"><input id="cameraAwbGain" type="checkbox" /><span>AWB gain</span></label><label class="camera-inline-check"><input id="cameraAdvancedAwb" type="checkbox" /><span>Advanced AWB</span></label></div>
+                          </div>
+                          <select id="cameraWbMode">
+                            <option value="0">Auto</option><option value="1">Sunny</option><option value="2">Cloudy</option>
+                            <option value="3">Office</option><option value="4">Home</option>
+                          </select>
+                        </div>
+                      </div>
+                    </section>
+                    <section class="camera-control-group">
+                      <h4>Image processing</h4>
+                      <div class="camera-settings-grid">
+                        <label class="camera-check"><input id="cameraBpc" type="checkbox" /><span>Black pixel correction</span></label>
+                        <label class="camera-check"><input id="cameraWpc" type="checkbox" /><span>White pixel correction</span></label>
+                        <label class="camera-check"><input id="cameraGamma" type="checkbox" /><span>Gamma</span></label>
+                        <label class="camera-check"><input id="cameraLenc" type="checkbox" /><span>Lens correction</span></label>
+                      </div>
+                    </section>
+                    <section class="camera-control-group">
+                      <h4>Orientation</h4>
+                      <div class="camera-settings-grid">
+                        <label class="camera-check"><input id="cameraMirror" type="checkbox" /><span>Mirror</span></label>
+                        <label class="camera-check"><input id="cameraFlipSetting" type="checkbox" /><span>Flip</span></label>
+                      </div>
+                    </section>
+                  </div>
+                </details>
+                <div class="camera-settings-actions">
+                  <button id="cameraSettingsApply" class="mini-button" disabled>Apply</button>
+                  <button id="cameraSettingsReset" class="mini-button danger-soft" disabled>Reset defaults</button>
+                </div>
+              </details>
+            </section>
+            <section class="card camera-observer" data-tabs="camera">
+              <div class="section-title">
+                <strong data-caption="Idle-only local luminance and motion telemetry">Vision observer</strong
+                ><span id="cameraObserverHeaderState">Disabled</span>
+              </div>
+              <div class="camera-observer-config">
+                <div class="camera-observer-config-heading">
+                  <h3>Configuration</h3>
+                  <span>Auto-save</span>
+                </div>
+                <div class="camera-observer-settings">
+                  <div class="audio-row microphone-toggle-row camera-observer-config-row">
+                    <span class="audio-name"><b>Vision observer</b><small>Idle-only local motion sampling</small></span>
+                    <label class="toggle"><input id="cameraObserverEnabled" type="checkbox" /><span>Enabled</span></label>
+                  </div>
+                  <div class="audio-row microphone-toggle-row camera-observer-config-row">
+                    <span class="audio-name"><b>Camera attention</b><small>Neutral face follows visual motion while Idle. Requires Vision observer.</small></span>
+                    <label class="toggle"><input id="cameraAttentionEnabled" type="checkbox" /><span>Enabled</span></label>
+                  </div>
+                  <div class="audio-row camera-observer-config-row">
+                    <span class="audio-name"><b>Motion-loss timeout</b><small>Hold the last target through brief motion gaps</small></span>
+                    <div class="camera-observer-number"><input id="cameraAttentionTimeout" type="number" min="0" max="3000" step="50" value="750" /><span>ms</span></div>
+                  </div>
+                  <div class="audio-row camera-observer-config-row">
+                    <span class="audio-name"><b>Tracking gain</b><small>Amplify current motion-centroid displacement</small></span>
+                    <div class="camera-observer-number"><input id="cameraAttentionGain" type="number" min="0.5" max="3" step="0.1" value="1.8" /><span>x</span></div>
+                  </div>
+                  <div class="audio-row microphone-toggle-row camera-observer-config-row">
+                    <span class="audio-name"><b>Motion event preview</b><small>Latest volatile frame from activity, motion, or manual capture</small></span>
+                    <div class="camera-event-frame-actions">
+                      <button id="cameraEventFrameCapture" class="mini-button" type="button" disabled>Capture now</button>
+                      <label class="toggle"><input id="cameraEventFrameEnabled" type="checkbox" /><span>Enabled</span></label>
+                    </div>
+                  </div>
+                  <h4 class="camera-observer-config-group">Sampling</h4>
+                  <div class="audio-row microphone-select-row camera-observer-config-row camera-observer-interval-row">
+                    <span class="audio-name"><b>Quiet interval</b><small>Normal idle sampling cadence</small></span>
+                    <div class="camera-observer-intervals" role="radiogroup" aria-label="Observer quiet interval">
+                      <label><input type="radio" name="cameraObserverQuietInterval" value="500" /><span>500 ms</span></label>
+                      <label><input type="radio" name="cameraObserverQuietInterval" value="1000" checked /><span>1 s</span></label>
+                      <label><input type="radio" name="cameraObserverQuietInterval" value="2000" /><span>2 s</span></label>
+                    </div>
+                  </div>
+                  <div class="audio-row microphone-select-row camera-observer-config-row camera-observer-interval-row">
+                    <span class="audio-name"><b>Active interval</b><small>Burst and motion sampling cadence</small></span>
+                    <div class="camera-observer-intervals" role="radiogroup" aria-label="Observer active interval">
+                      <label><input type="radio" name="cameraObserverActiveInterval" value="100" /><span>100 ms</span></label>
+                      <label><input type="radio" name="cameraObserverActiveInterval" value="250" checked /><span>250 ms</span></label>
+                      <label><input type="radio" name="cameraObserverActiveInterval" value="500" /><span>500 ms</span></label>
+                    </div>
+                  </div>
+                  <h4 class="camera-observer-config-group">Sensitivity</h4>
+                  <div class="audio-row camera-observer-config-row">
+                    <span class="audio-name"><b>Cell threshold</b><small>Per-cell compensated luma delta</small></span>
+                    <div class="camera-observer-number"><input id="cameraMotionCellThreshold" type="number" min="1" max="255" step="1" value="18" /><span>luma</span></div>
+                  </div>
+                  <div class="audio-row camera-observer-config-row">
+                    <span class="audio-name"><b>Activity</b><small>Start or extend burst sampling</small></span>
+                    <div class="camera-observer-number"><input id="cameraMotionActivityRatio" type="number" min="0.01" max="100" step="0.1" value="2" /><span>%</span></div>
+                  </div>
+                  <div class="audio-row camera-observer-config-row">
+                    <span class="audio-name"><b>Motion enter</b><small>Changed-cell threshold to enter Motion</small></span>
+                    <div class="camera-observer-number"><input id="cameraMotionEnterRatio" type="number" min="0.01" max="100" step="0.1" value="5" /><span>%</span></div>
+                  </div>
+                  <div class="audio-row camera-observer-config-row">
+                    <span class="audio-name"><b>Motion exit</b><small>Changed-cell threshold to exit Motion</small></span>
+                    <div class="camera-observer-number"><input id="cameraMotionExitRatio" type="number" min="0.01" max="100" step="0.1" value="3" /><span>%</span></div>
+                  </div>
+                  <div class="audio-row camera-observer-config-row">
+                    <span class="audio-name"><b>Enter samples</b><small>Consecutive samples required</small></span>
+                    <div class="camera-observer-number"><input id="cameraMotionEnterSamples" type="number" min="1" max="10" step="1" value="2" /><span>samples</span></div>
+                  </div>
+                  <div class="audio-row camera-observer-config-row">
+                    <span class="audio-name"><b>Exit samples</b><small>Consecutive samples required</small></span>
+                    <div class="camera-observer-number"><input id="cameraMotionExitSamples" type="number" min="1" max="10" step="1" value="3" /><span>samples</span></div>
+                  </div>
+                  <div class="audio-row camera-observer-config-row">
+                    <span class="audio-name"><b>Activity hold</b><small>Keep burst cadence after activity</small></span>
+                    <div class="camera-observer-number"><input id="cameraMotionActivityHold" type="number" min="250" max="10000" step="250" value="1500" /><span>ms</span></div>
+                  </div>
+                </div>
+              </div>
+              <section class="camera-observer-details-section">
+                <h3>Runtime details</h3>
+                <div class="camera-diagnostics-grid camera-observer-details" aria-label="Vision observer runtime telemetry">
+                <div class="camera-observer-details-column">
+                <section class="camera-diag-group">
+                  <h3>Observer lifecycle</h3>
+                  <dl>
+                    <div><dt>State</dt><dd id="cameraObserverState">Disabled</dd></div>
+                    <div><dt>Suspend reason</dt><dd id="cameraObserverReason">Disabled</dd></div>
+                    <div><dt>Sampling state</dt><dd id="cameraObserverSamplingState">Quiet</dd></div>
+                    <div><dt>Current interval</dt><dd id="cameraObserverCurrentInterval">1 s</dd></div>
+                    <div><dt>Last sample</dt><dd id="cameraObserverLastSample">Never</dd></div>
+                    <div><dt>Samples</dt><dd id="cameraObserverSamples">0</dd></div>
+                    <div><dt>Skipped</dt><dd id="cameraObserverSkipped">0</dd></div>
+                    <div><dt>Failures</dt><dd id="cameraObserverFailures">0</dd></div>
+                  </dl>
+                </section>
+                <section class="camera-diag-group">
+                  <h3>Performance / memory</h3>
+                  <dl>
+                    <div><dt>Capture</dt><dd id="cameraObserverCapture">—</dd></div>
+                    <div><dt>Decode</dt><dd id="cameraObserverDecode">—</dd></div>
+                    <div><dt>Analyze</dt><dd id="cameraObserverAnalyze">—</dd></div>
+                    <div><dt>Observer total</dt><dd id="cameraObserverTotal">—</dd></div>
+                    <div><dt>Scratch PSRAM</dt><dd id="cameraObserverScratch">0 B</dd></div>
+                  </dl>
+                </section>
+                <section class="camera-diag-group">
+                  <h3>Camera attention</h3>
+                  <dl>
+                    <div><dt>State</dt><dd id="cameraAttentionState">Disabled</dd></div>
+                    <div><dt>Origin</dt><dd id="cameraAttentionOrigin">None</dd></div>
+                    <div class="wide"><dt>Desired target X/Y</dt><dd id="cameraAttentionTarget">0.00 / 0.00</dd></div>
+                    <div class="wide"><dt>Applied translation X/Y</dt><dd id="cameraAttentionApplied">0 / 0 px</dd></div>
+                    <div><dt>Wake stage</dt><dd id="cameraAttentionWakeStage">Armed</dd></div>
+                    <div><dt>Wake stage age</dt><dd id="cameraAttentionWakeAge">—</dd></div>
+                    <div><dt>Visual wakes</dt><dd id="cameraAttentionWakeCount">0</dd></div>
+                    <div><dt>Loss grace</dt><dd id="cameraAttentionLossGrace">—</dd></div>
+                  </dl>
+                </section>
+                </div>
+                <div class="camera-observer-details-column">
+                <section class="camera-diag-group">
+                  <h3>Motion analysis</h3>
+                  <dl>
+                    <div><dt>Motion state</dt><dd id="cameraObserverMotionState">Quiet</dd></div>
+                    <div><dt>Changed pixels</dt><dd id="cameraObserverChangedRatio">—</dd></div>
+                    <div><dt>Active cells</dt><dd id="cameraMotionActiveCells">—</dd></div>
+                    <div><dt>Motion centroid</dt><dd id="cameraMotionCentroid">—</dd></div>
+                    <div><dt>Motion region</dt><dd id="cameraMotionRegion">—</dd></div>
+                    <div class="wide"><dt>Motion bbox</dt><dd id="cameraMotionBbox">—</dd></div>
+                    <div><dt>BBox area</dt><dd id="cameraMotionBboxArea">—</dd></div>
+                    <div><dt>Global luma</dt><dd id="cameraObserverLuma">—</dd></div>
+                    <div><dt>Motion score</dt><dd id="cameraObserverMotionScore">—</dd></div>
+                    <div><dt>Center activity</dt><dd id="cameraObserverCenterScore">—</dd></div>
+                    <div><dt>Motion events</dt><dd id="cameraObserverEvents">0</dd></div>
+                    <div class="wide"><dt>Last motion event</dt><dd id="cameraObserverLastEvent">Never</dd></div>
+                  </dl>
+                </section>
+                <section class="camera-diag-group">
+                  <h3>Temporal tracking</h3>
+                  <dl>
+                    <div><dt>Track</dt><dd id="cameraMotionTrack">None</dd></div>
+                    <div><dt>Direction</dt><dd id="cameraMotionDirection">None</dd></div>
+                    <div class="wide"><dt>Velocity X/Y</dt><dd id="cameraMotionVelocity">—</dd></div>
+                    <div><dt>History</dt><dd id="cameraMotionHistory">0 samples</dd></div>
+                    <div><dt>Center crossing</dt><dd id="cameraMotionCrossing">—</dd></div>
+                    <div><dt>Crossings</dt><dd id="cameraMotionCrossingCount">0</dd></div>
+                  </dl>
+                </section>
+                </div>
+                </div>
+                <section id="cameraEventFrameSection" class="camera-diag-group camera-event-frame-group" hidden>
+                  <h3>Motion preview debug</h3>
+                  <div class="camera-event-frame-visuals">
+                    <div class="camera-event-frame-visual">
+                      <h4>Event frame</h4>
+                      <div class="camera-event-frame-preview">
+                        <canvas id="cameraEventFrameCanvas" width="160" height="120" aria-label="Vision motion event frame"></canvas>
+                        <span id="cameraEventFramePlaceholder">Motion event preview is off</span>
+                      </div>
+                    </div>
+                    <div class="camera-motion-coordinate-visual">
+                      <h4>Live motion position</h4>
+                      <canvas id="cameraMotionCoordinateCanvas" width="320" height="240" aria-label="Current camera attention input coordinates"></canvas>
+                    </div>
+                  </div>
+                  <dl>
+                    <div><dt>Format</dt><dd>160 × 120 RGB565LE</dd></div>
+                    <div><dt>Available</dt><dd id="cameraEventFrameAvailable">No</dd></div>
+                    <div><dt>Frame source</dt><dd id="cameraEventFrameSource">None</dd></div>
+                    <div><dt>Frame age</dt><dd id="cameraEventFrameAge">—</dd></div>
+                    <div><dt>Debug PSRAM</dt><dd id="cameraEventFramePsram">0 B</dd></div>
+                  </dl>
+                </section>
+              </section>
+            </section>
+            <section class="card camera-diagnostics" data-tabs="camera">
+              <div class="section-title">
+                <strong data-caption="OV3660 CCM and AWB register diagnostics">Camera diagnostics</strong
+                ><span id="cameraDiagState">Waiting</span>
+              </div>
+              <div class="camera-diagnostics-grid">
+                <section class="camera-diag-group">
+                  <h3>White balance</h3>
+                  <dl>
+                    <div><dt>AWB engine</dt><dd id="cameraDiagAwb">—</dd></div>
+                    <div><dt>AWB gain</dt><dd id="cameraDiagAwbGain">—</dd></div>
+                    <div><dt>Advanced AWB</dt><dd id="cameraDiagAdvancedAwb">—</dd></div>
+                    <div><dt>WB mode</dt><dd id="cameraDiagWbMode">—</dd></div>
+                    <div><dt>WB control · 3406</dt><dd id="cameraDiagWbControl">—</dd></div>
+                    <div><dt>R gain · 3400/01</dt><dd id="cameraDiagRGain">—</dd></div>
+                    <div><dt>G gain · 3402/03</dt><dd id="cameraDiagGGain">—</dd></div>
+                    <div><dt>B gain · 3404/05</dt><dd id="cameraDiagBGain">—</dd></div>
+                  </dl>
+                </section>
+                <section class="camera-diag-group">
+                  <h3>Color / ISP</h3>
+                  <dl>
+                    <div><dt>CCM state</dt><dd id="cameraDiagCcmState">—</dd></div>
+                    <div><dt>AWB calibration</dt><dd id="cameraDiagAwbTableState">—</dd></div>
+                    <div class="wide"><dt>Current CCM · 5381–538B</dt><dd id="cameraDiagCcmCurrent">—</dd></div>
+                    <div class="wide"><dt>Native CCM</dt><dd id="cameraDiagCcmNative">—</dd></div>
+                    <div><dt>Current AWB hash</dt><dd id="cameraDiagAwbCurrentHash">—</dd></div>
+                    <div><dt>Native AWB hash</dt><dd id="cameraDiagAwbNativeHash">—</dd></div>
+                    <div><dt>ISP control · 5000</dt><dd id="cameraDiagIsp00">—</dd></div>
+                    <div><dt>ISP control · 5001</dt><dd id="cameraDiagIsp01">—</dd></div>
+                  </dl>
+                </section>
+                <section class="camera-diag-group">
+                  <h3>Exposure / gain</h3>
+                  <dl>
+                    <div><dt>AEC</dt><dd id="cameraDiagAec">—</dd></div>
+                    <div><dt>AEC2</dt><dd id="cameraDiagAec2">—</dd></div>
+                    <div><dt>AGC</dt><dd id="cameraDiagAgc">—</dd></div>
+                    <div><dt>Exposure raw</dt><dd id="cameraDiagExposure">—</dd></div>
+                    <div><dt>Gain raw</dt><dd id="cameraDiagGain">—</dd></div>
+                    <div><dt>Gain ceiling</dt><dd id="cameraDiagGainCeiling">—</dd></div>
+                    <div><dt>AE high · 3A0F</dt><dd id="cameraDiagAeHigh">—</dd></div>
+                    <div><dt>AE low · 3A10</dt><dd id="cameraDiagAeLow">—</dd></div>
+                    <div><dt>AE high 2 · 3A1B</dt><dd id="cameraDiagAeHigh2">—</dd></div>
+                    <div><dt>AE low 2 · 3A1E</dt><dd id="cameraDiagAeLow2">—</dd></div>
+                    <div><dt>AE fast high · 3A11</dt><dd id="cameraDiagAeFastHigh">—</dd></div>
+                    <div><dt>AE fast low · 3A1F</dt><dd id="cameraDiagAeFastLow">—</dd></div>
+                  </dl>
+                </section>
+                <section class="camera-diag-group">
+                  <h3>Image pipeline</h3>
+                  <dl>
+                    <div><dt>BPC</dt><dd id="cameraDiagBpc">—</dd></div>
+                    <div><dt>WPC</dt><dd id="cameraDiagWpc">—</dd></div>
+                    <div><dt>Gamma</dt><dd id="cameraDiagGamma">—</dd></div>
+                    <div><dt>Lens correction</dt><dd id="cameraDiagLenc">—</dd></div>
+                    <div><dt>Mirror</dt><dd id="cameraDiagMirror">—</dd></div>
+                    <div><dt>Flip</dt><dd id="cameraDiagFlip">—</dd></div>
+                  </dl>
+                  <h3 class="camera-diag-health-title">Diagnostic health</h3>
+                  <dl>
+                    <div><dt>Snapshot age</dt><dd id="cameraDiagAge">—</dd></div>
+                    <div><dt>Register read</dt><dd id="cameraDiagRead">—</dd></div>
+                  </dl>
+                </section>
+              </div>
+            </section>
+            <section
+              class="card"
+              data-tabs="overview control"
+              data-lane-control="1"
+              data-order-control="40"
+            >
+              <div class="section-title">
+                <strong data-caption="Common device operations">Quick actions</strong><span id="danceState">Ready</span>
+              </div>
+              <div class="actions">
+                <button class="action" id="wakeAction" data-action="wake">
+                  <span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"></circle><path d="M12 2v2M12 20v2M2 12h2M20 12h2"></path></svg></span
+                  ><span
+                    ><b id="wakeLabel">Wake</b
+                    ><small>Start or stop conversation</small></span
+                  ></button
+                ><button
+                  class="action"
+                  id="idleAction"
+                  data-action="return_idle"
+                >
+                  <span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><rect x="9" y="9" width="6" height="6" rx="1"></rect></svg></span
+                  ><span
+                    ><b>Return to idle</b
+                    ><small>Stop activity safely</small></span
+                  ></button
+                ><button class="action" id="danceAction" data-action="dance">
+                  <span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="16" cy="16" r="3"></circle></svg></span
+                  ><span
+                    ><b>Dance</b><small>30–50 randomized steps</small></span
+                  ></button
+                ><button
+                  class="action"
+                  id="lightsAction"
+                  data-action="lights_toggle"
+                >
+                  <span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></span
+                  ><span
+                    ><b>Status lights</b><small>Toggle Edison LEDs</small></span
+                  ></button
+                ><button class="action" data-action="audio_test">
+                  <span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4zM15 9a5 5 0 0 1 0 6M18 6a9 9 0 0 1 0 12"></path></svg></span
+                  ><span
+                    ><b>Audio test</b><small>Play a speaker tone</small></span
+                  ></button
+                ><button class="action danger" data-action="wifi_config">
+                  <span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9a11 11 0 0 1 14 0M8 12a7 7 0 0 1 8 0M11 15a3 3 0 0 1 2 0"></path><circle cx="12" cy="18" r="1"></circle></svg></span
+                  ><span
+                    ><b>Wi-Fi config</b
+                    ><small>Reconnect this robot</small></span
+                  ></button
+                ><button class="action danger" data-action="reboot">
+                  <span class="icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v9M6.3 5.7a8 8 0 1 0 11.4 0"></path></svg></span
+                  ><span><b>Reboot</b><small>Restart this robot</small></span>
+                </button>
+              </div>
+            </section>
+          </div>
+          <section class="card log-card camera-log-card" data-tabs="camera">
+            <div class="log-head">
+              <div class="log-state"><i></i><span id="cameraLogState">Camera log · filtered</span></div>
+            </div>
+            <pre id="cameraLogOutput" class="log-output">No camera logs yet</pre>
+          </section>
+          <section class="card" data-tabs="diagnostics">
+            <div class="section-title">
+              <strong data-caption="Persistent WebSocket transport">Transport health</strong>
+              <span id="transportHealthSummary">—</span>
+            </div>
+            <div class="device-grid">
+              <div class="device-row"><span>Mode</span><b id="transportMode">—</b></div>
+              <div class="device-row"><span>State</span><b id="transportState">—</b></div>
+              <div class="device-row"><span>Connection age</span><b id="transportAge">—</b></div>
+              <div class="device-row"><span>Last control RX</span><b id="transportLastRx">—</b></div>
+              <div class="device-row"><span>Reconnects</span><b id="transportReconnects">0</b></div>
+              <div class="device-row"><span>Next retry</span><b id="transportRetry">—</b></div>
+            </div>
+          </section>
+          <section class="card log-card" data-tabs="diagnostics">
+            <div class="log-head">
+              <div class="log-state">
+                <i></i><span id="logState">Live system log</span
+                ><span id="errorBadge" class="badge">0</span>
+              </div>
+              <div class="log-tools">
+                <input
+                  id="logSearch"
+                  class="log-search"
+                  placeholder="Search logs"
+                /><select id="logFilter" class="log-select">
+                  <option value="all">All</option>
+                  <option value="error">Errors</option>
+                  <option value="warn">Warnings</option>
+                  <option value="info">Info</option></select
+                ><button id="pauseLog" class="log-button">Pause</button
+                ><button id="downloadLog" class="log-button">Save</button
+                ><button id="clearLog" class="log-button">Clear</button>
+              </div>
+            </div>
+            <pre id="logOutput" class="log-output">
+Waiting for system logs…</pre
+            >
+            <div class="log-foot">
+              <span id="logSize">16 KB device buffer</span
+              ><label class="auto-scroll"
+                ><input id="autoScroll" type="checkbox" checked />
+                Auto-scroll</label
+              >
+            </div>
+          </section>
+        </div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <button id="panicStop" class="panic-stop" data-stop>STOP MOTORS</button>
+    <div class="toast" id="toast"></div>
+    <script src="js/core.js"></script>
+    <script src="js/drive.js"></script>
+    <script src="js/oled.js"></script>
+    <script src="js/chat_asr.js"></script>
+    <script src="js/server_config.js"></script>
+    <script src="js/camera_motion.js"></script>
+    <script src="js/face_geometry.js"></script>
+    <script src="js/status.js"></script>
+    <script src="js/camera_logs.js"></script>
+    <script src="js/tabs.js"></script>
+    <script src="app.js"></script>
+    <!-- ROBOT_WEB_CONTROL_SCRIPT -->
+  </body>
+</html>

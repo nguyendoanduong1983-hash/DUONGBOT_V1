@@ -1,0 +1,135 @@
+#pragma once
+
+#include "camera_image_policy.h"
+#include "camera_observer.h"
+#include "camera_settings.h"
+#include "camera_vision_event_frame.h"
+#include "esp32_camera.h"
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <functional>
+#include <mutex>
+#include <string>
+
+class DeskRobotCamera : public Esp32Camera {
+public:
+    using JpegSender = std::function<bool(const uint8_t*, size_t)>;
+    enum class PreviewMode : uint8_t {
+        kOff,
+        kWebLive,
+        kMochanPreview,
+    };
+
+    enum class McpRequestState : uint8_t {
+        kNever,
+        kCapturing,
+        kAnalyzing,
+        kSucceeded,
+        kFailed,
+    };
+
+    struct McpRequestHealth {
+        McpRequestState state = McpRequestState::kNever;
+        int64_t started_us = 0;
+        uint32_t capture_ms = 0;
+        uint32_t vision_ms = 0;
+        size_t image_bytes = 0;
+        size_t response_bytes = 0;
+    };
+    using McpStateCallback = std::function<void(McpRequestState)>;
+    using BackgroundWakeCallback = std::function<void()>;
+
+    DeskRobotCamera(const camera_config_t& config, std::mutex& shared_i2c_mutex,
+                    const CameraSettingsConfig& settings, CameraImagePolicy& image_policy,
+                    McpStateCallback mcp_state_callback,
+                    BackgroundWakeCallback background_wake_callback);
+
+    bool Capture() override;
+    bool StartWebLive();
+    void StopWebLive();
+    bool StartMochanPreview();
+    void StopMochanPreview();
+    void ForceOff() override;
+    void OnIdle() override;
+    PreviewMode preview_mode() const { return preview_mode_.load(); }
+    bool IsWebLiveActive() const {
+        return preview_mode_.load() == PreviewMode::kWebLive;
+    }
+    bool IsMochanPreviewActive() const {
+        return preview_mode_.load() == PreviewMode::kMochanPreview;
+    }
+    bool IsMcpOperationActive() const { return mcp_operation_active_.load(); }
+    bool CapturePreview();
+    bool SendWebLiveFrame(const JpegSender& sender);
+    bool SendSnapshot(const JpegSender& sender);
+    bool IsAvailable() const;
+    bool ApplySettings(const CameraSettingsConfig& settings);
+    CameraSettingsConfig GetSettings() const;
+    int WebFrameIntervalMs() const;
+    const char* SensorName() const;
+    CameraImagePolicy::Status GetImagePolicyStatus() const;
+    McpRequestHealth GetMcpRequestHealth() const;
+    CameraDiagnostics GetDiagnostics();
+    CameraObserverStatus GetObserverStatus() const;
+    void ResetObserverContinuity();
+    int GetObserverRecommendedIntervalMs() const;
+    CameraVisionEventFrameStatus GetVisionEventFrameStatus() const;
+    bool SetVisionEventFrameEnabled(bool enabled);
+    bool SendVisionEventFrame(const CameraVisionEventFrame::FrameSender& sender) const;
+    bool QueueVisionEventFrameCapture();
+    bool IsVisionEventFrameCapturePending() const {
+        return vision_event_frame_capture_pending_.load(std::memory_order_acquire);
+    }
+    bool CaptureObserverSample(bool manual_event_frame = false);
+    void SetObserverWorkerState(CameraObserverState state,
+                                CameraObserverSuspendReason reason,
+                                bool count_skip = false);
+    static const char* McpRequestStateName(McpRequestState state);
+    std::expected<std::string, std::string> Explain(const std::string& question) override;
+    void OnMcpResponseSent() override;
+
+private:
+    bool BeginMcpOperation(bool& preview_preempted);
+    void EndMcpOperation();
+    void HidePreviewImage();
+    bool ApplyModeCaptureSettings(CameraResolution resolution, int jpeg_quality);
+    bool ApplyModeSensorSettings(const CameraSensorSettings& settings);
+    CameraSensorSettings ResolveSensorSettings(const CameraSensorSettings& settings) const;
+    void UpdateMcpRequestState(McpRequestState state);
+    static framesize_t ToFrameSize(CameraResolution resolution);
+    static gainceiling_t ToGainCeiling(CameraGainCeiling ceiling);
+    static CameraSensorControls ToSensorControls(const CameraSensorSettings& settings);
+    void WakeBackgroundWorker();
+
+    std::mutex ownership_mutex_;
+    std::timed_mutex capture_mutex_;
+    std::atomic<PreviewMode> preview_mode_{PreviewMode::kOff};
+    std::atomic_bool mcp_operation_active_{false};
+    std::atomic_bool mcp_capture_pending_{false};
+    std::atomic<McpRequestState> mcp_request_state_{McpRequestState::kNever};
+    std::atomic<int64_t> mcp_request_started_us_{0};
+    std::atomic<uint32_t> mcp_capture_ms_{0};
+    std::atomic<uint32_t> mcp_vision_ms_{0};
+    std::atomic_size_t mcp_image_bytes_{0};
+    std::atomic_size_t mcp_response_bytes_{0};
+    mutable std::mutex settings_mutex_;
+    CameraSettingsConfig settings_;
+    std::mutex diagnostics_refresh_mutex_;
+    std::mutex diagnostics_cache_mutex_;
+    CameraDiagnostics diagnostics_cache_;
+    std::mutex observer_sample_gate_;
+    std::atomic_bool observer_runtime_allowed_{true};
+    std::atomic_bool observer_mode_configured_{false};
+    CameraSensorSettings observer_applied_sensor_settings_;
+    bool observer_applied_sensor_settings_valid_ = false;
+    bool observer_baseline_reset_pending_ = false;
+    CameraObserver observer_;
+    CameraVisionEventFrame vision_event_frame_;
+    std::atomic_bool vision_event_frame_capture_pending_{false};
+    CameraImagePolicy& image_policy_;
+    McpStateCallback mcp_state_callback_;
+    BackgroundWakeCallback background_wake_callback_;
+};

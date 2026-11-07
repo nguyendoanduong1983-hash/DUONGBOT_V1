@@ -1,0 +1,110 @@
+#pragma once
+
+#include "camera/camera_observer.h"
+#include "camera/camera_settings.h"
+#include "camera/camera_vision_event_frame.h"
+#include "behavior/camera_attention_controller.h"
+#include "display/face_geometry.h"
+#include "platform/camera_diagnostics.h"
+#include "robot_status.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <string>
+
+class RobotController {
+public:
+    using SnapshotSender = std::function<bool(const uint8_t*, size_t)>;
+    using EventFrameSender = CameraVisionEventFrame::FrameSender;
+    enum class MovePolicy { kReplaceCurrent, kPreserveQueued };
+
+    virtual ~RobotController();
+
+    virtual bool Move(MotorController::Direction direction, int duration_ms, MovePolicy policy) = 0;
+    virtual bool SetLiveDrive(int left_percent, int right_percent) = 0;
+    virtual void Stop() = 0;
+    virtual CliffSensor::Status GetCliffStatus() const = 0;
+    virtual bool Dance() = 0;
+    virtual bool SetWobbleEnabled(bool enabled) = 0;
+    virtual bool TurnRelative(int degrees, std::string& message) = 0;
+
+    virtual bool React(const std::string& reaction, int duration_ms,
+                       const std::string& oled_text = "") = 0;
+    virtual bool CancelReaction() = 0;
+    virtual void NotifyToolResult(bool success) = 0;
+
+    virtual bool ShowEmotion(const std::string& emotion, int duration_ms) = 0;
+    virtual bool GetFaceGeometry(const std::string& emotion, FaceGeometry& geometry,
+                                 bool* customized = nullptr) const = 0;
+    virtual bool GetFaceGeometryLayoutYOffset(const std::string& emotion,
+                                              int& offset_y) const = 0;
+    virtual bool SaveFaceGeometry(const std::string& emotion, FaceGeometry geometry) = 0;
+    virtual bool ResetFaceGeometry(const std::string& emotion) = 0;
+    virtual bool ResetAllFaceGeometry() = 0;
+    virtual bool ShowSecondaryText(const std::string& text, int duration_ms) = 0;
+    virtual bool SetStatusLightEffect(const std::string& effect, int duration_ms) = 0;
+    virtual bool ToggleCameraMirror() = 0;
+    virtual bool ToggleCameraFlip() = 0;
+    virtual bool ToggleDisplayFlip() = 0;
+    virtual bool ToggleStatusLight() = 0;
+    virtual bool ToggleLiveCamera() = 0;
+    virtual bool StartWebCameraStream() = 0;
+    virtual bool IsWebCameraStreamEnabled() const = 0;
+    virtual bool SendWebCameraFrame(const SnapshotSender& sender) = 0;
+    virtual int GetWebCameraFrameIntervalMs() const = 0;
+    virtual void StopWebCameraStream() = 0;
+    virtual bool SendSnapshot(const SnapshotSender& sender) = 0;
+    virtual CameraSettingsConfig GetCameraSettings() const = 0;
+    virtual bool ApplyCameraSettings(const CameraSettingsConfig& settings) = 0;
+    virtual bool ResetCameraSettings() = 0;
+    virtual std::string GetCameraSensorName() const = 0;
+    virtual CameraDiagnostics GetCameraDiagnostics() = 0;
+    virtual CameraObserverStatus GetCameraObserverStatus() const = 0;
+    virtual CameraVisionEventFrameStatus GetCameraVisionEventFrameStatus() const = 0;
+    virtual bool SetCameraVisionEventFrameEnabled(bool enabled) = 0;
+    virtual bool SendCameraVisionEventFrame(const EventFrameSender& sender) const = 0;
+    virtual bool QueueCameraVisionEventFrameCapture() = 0;
+    virtual CameraAttentionController::Status GetCameraAttentionStatus() const = 0;
+    virtual void SetCameraAttentionEnabled(bool enabled) = 0;
+    virtual void SetCameraAttentionMotionLossTimeoutMs(int timeout_ms) = 0;
+    virtual void SetCameraAttentionTrackingGainPercent(int gain_percent) = 0;
+
+    virtual SecondaryOled::Config GetSecondaryDisplayConfig() const = 0;
+    virtual void SetSecondaryDisplayConfig(const SecondaryOled::Config& config) = 0;
+
+    virtual void SetSpeakerVolume(int volume) = 0;
+    virtual void SetAmbientSoundEnabled(bool enabled) = 0;
+    virtual bool SetMicrophoneProfile(const std::string& profile) = 0;
+    virtual void SetMicrophoneCaptureTrim(int trim_db) = 0;
+    virtual void SetMicrophoneVoiceGain(int gain_db) = 0;
+    virtual void SetMicrophoneNoiseSuppression(bool enabled) = 0;
+    virtual void SetMicrophoneAutomaticGainControl(bool enabled) = 0;
+    virtual void SetMicrophoneMuted(bool muted) = 0;
+    virtual void SetScreenBrightness(int brightness) = 0;
+    virtual void SetAutoBrightnessEnabled(bool enabled) = 0;
+    virtual void SetAutoBrightnessMinimum(int brightness) = 0;
+    virtual void SetAutoBrightnessMaximum(int brightness) = 0;
+    virtual void SetDeskModeEnabled(bool enabled) = 0;
+    virtual void SetDeskModeDelaySeconds(int seconds) = 0;
+    virtual void SetDeskModeUse24Hour(bool use_24_hour) = 0;
+    virtual void SetMotorSpeed(int speed) = 0;
+    virtual void SetDriveDuration(int duration_ms) = 0;
+    virtual void SetEmotionMovementEnabled(bool enabled) = 0;
+    virtual void SetStatusLightBrightness(int brightness) = 0;
+    virtual void SetCliffThreshold(int edge_mm) = 0;
+    virtual void SetObstacleAvoidanceMode(bool enabled) = 0;
+    virtual void SetMotionEmotionsEnabled(bool enabled) = 0;
+
+    virtual bool StartBatteryCapacityTest() = 0;
+    virtual void StopBatteryCapacityTest() = 0;
+    virtual void ResetBatteryCapacityTest() = 0;
+
+    virtual void ToggleWake() = 0;
+    virtual bool PlayAudioTest() = 0;
+    virtual void ReturnToIdleState() = 0;
+    virtual bool Reboot() = 0;
+    virtual void EnterWifiSetup() = 0;
+
+    virtual RobotStatus GetStatus() = 0;
+};

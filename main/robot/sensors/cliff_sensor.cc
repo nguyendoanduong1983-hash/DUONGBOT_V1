@@ -1,0 +1,245 @@
+#include "cliff_sensor.h"
+
+#include "config/hardware_config.h"
+#include "config/tuning.h"
+
+#include <esp_err.h>
+#include <esp_heap_caps.h>
+#include <esp_log.h>
+
+#include <algorithm>
+
+extern "C" {
+#include <vl53l0x.h>
+}
+
+#define TAG "CliffSensor"
+
+namespace {
+
+constexpr uint32_t kTaskStackSize = 8192;
+
+}  // namespace
+
+bool CliffSensor::Initialize(i2c_master_bus_handle_t bus, std::mutex& bus_mutex, int edge_mm,
+                             void* callback_context, CliffCallback callback) {
+    SetEdgeMm(edge_mm);
+    callback_context_ = callback_context;
+    cliff_callback_ = callback;
+    bus_mutex_ = &bus_mutex;
+    std::lock_guard<std::mutex> bus_lock(*bus_mutex_);
+    if (i2c_master_probe(bus, DISTANCE_SENSOR_I2C_ADDRESS, 100) != ESP_OK) {
+        ESP_LOGW(TAG, "VL53L0X not detected at 0x%02x", DISTANCE_SENSOR_I2C_ADDRESS);
+        return false;
+    }
+    vl53l0x_handle_t sensor = sensor_;
+    esp_err_t error = vl53l0x_create(&sensor, bus);
+    sensor_ = sensor;
+    if (error == ESP_OK && !ConfigureSensor(sensor)) {
+        error = ESP_FAIL;
+    }
+    if (error != ESP_OK) {
+        ESP_LOGW(TAG, "VL53L0X initialization failed: %s", esp_err_to_name(error));
+        if (sensor != nullptr) {
+            vl53l0x_destroy(sensor);
+            sensor_ = nullptr;
+        }
+        return false;
+    }
+    if (xTaskCreateWithCaps(TaskEntry, "vl53l0x", kTaskStackSize, this, 1, &task_,
+                            MALLOC_CAP_SPIRAM) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create VL53L0X task in PSRAM");
+        vl53l0x_destroy(sensor);
+        sensor_ = nullptr;
+        return false;
+    }
+    ESP_LOGI(TAG, "VL53L0X ready on shared auxiliary I2C bus");
+    return true;
+}
+
+bool CliffSensor::ConfigureSensor(vl53l0x* sensor) {
+    esp_err_t error = vl53l0x_init(sensor);
+    if (error == ESP_OK) {
+        vl53l0x_ref_spad_calibration_t spad_calibration = {};
+        error = vl53l0x_perform_ref_spad_management(sensor, &spad_calibration);
+        if (error == ESP_OK) {
+            error = vl53l0x_set_reference_spads(sensor, &spad_calibration);
+        }
+    }
+    if (error == ESP_OK) {
+        vl53l0x_ref_calibration_t reference_calibration = {};
+        error = vl53l0x_perform_ref_calibration(sensor, &reference_calibration);
+    }
+    if (error == ESP_OK) {
+        error = vl53l0x_set_profile(sensor, VL53L0X_PROFILE_DEFAULT);
+    }
+    return error == ESP_OK;
+}
+
+bool CliffSensor::RecoverSensor(vl53l0x* sensor) {
+    ESP_LOGD(TAG, "Recovering VL53L0X device without resetting shared I2C bus");
+    if (vl53l0x_reset(sensor) != ESP_OK || !ConfigureSensor(sensor)) {
+        ESP_LOGD(TAG, "VL53L0X device recovery failed");
+        return false;
+    }
+    ESP_LOGD(TAG, "VL53L0X device recovery completed");
+    return true;
+}
+
+void CliffSensor::TaskEntry(void* arg) { static_cast<CliffSensor*>(arg)->RunTask(); }
+
+void CliffSensor::RunTask() {
+    vl53l0x_handle_t sensor = sensor_;
+    TickType_t last_wake_time = xTaskGetTickCount();
+    uint8_t unsafe_samples = 0;
+    uint8_t consecutive_failures = 0;
+    bool failure_reported = false;
+    bool recovery_reported = false;
+    bool stack_usage_reported = false;
+    ESP_LOGI(TAG, "VL53L0X task started with %u-byte PSRAM stack",
+             static_cast<unsigned>(kTaskStackSize));
+    while (true) {
+        vl53l0x_data_t reading = {};
+        esp_err_t error = ESP_FAIL;
+        {
+            std::lock_guard<std::mutex> bus_lock(*bus_mutex_);
+            error = vl53l0x_single_measure(sensor, &reading);
+            if (error != ESP_OK) {
+                // The component's single-shot helper leaves its internal
+                // `measuring` flag set when PAL/I2C exits early. Clear the
+                // device interrupt/state first; escalate to a VL53-only soft
+                // reset after repeated failures. Never reset the shared bus.
+                ++consecutive_failures;
+                const esp_err_t clear_error = vl53l0x_clear_interrupt_mask(sensor);
+                if (clear_error == ESP_OK) {
+                    ESP_LOGD(TAG, "VL53L0X measurement state cleared");
+                }
+                if (consecutive_failures >= 3) {
+                    const bool recovered = RecoverSensor(sensor);
+                    if (!recovery_reported) {
+                        if (recovered) {
+                            ESP_LOGI(TAG, "VL53L0X recovery applied; awaiting measurement");
+                        } else {
+                            ESP_LOGE(TAG, "VL53L0X recovery failed; background retries continue");
+                        }
+                        recovery_reported = true;
+                    }
+                    consecutive_failures = 0;
+                    last_wake_time = xTaskGetTickCount();
+                }
+            }
+        }
+        if (error == ESP_OK) {
+            if (!stack_usage_reported) {
+                ESP_LOGI(TAG, "VL53L0X first measurement stack free=%u bytes",
+                         static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+                stack_usage_reported = true;
+            }
+            if (failure_reported) {
+                ESP_LOGI(TAG, "VL53L0X measurements resumed");
+                failure_reported = false;
+            }
+            recovery_reported = false;
+            consecutive_failures = 0;
+            distance_mm_.store(reading.distance_mm);
+            distance_valid_.store(reading.valid && reading.distance_mm > 0);
+        } else {
+            distance_valid_.store(false);
+            if (!failure_reported) {
+                ESP_LOGW(TAG, "VL53L0X measurement failed: %s", esp_err_to_name(error));
+                failure_reported = true;
+            }
+        }
+
+        const int edge_mm = edge_mm_.load(std::memory_order_relaxed);
+        const auto mode = mode_.load(std::memory_order_relaxed);
+
+        bool is_danger = false;
+        if (mode == Mode::kObstacleForward) {
+            // Chế độ Cảm biến tránh vật cản phía trước:
+            // Nguy hiểm khi có vật cản nằm trong phạm vi phát hiện (0 < distance <= edge_mm).
+            // Nếu không có vật cản (tia không dội lại hoặc khoảng cách an toàn > edge_mm) -> An toàn!
+            is_danger = (error == ESP_OK && reading.valid && reading.distance_mm > 0 &&
+                         reading.distance_mm <= edge_mm);
+        } else {
+            // Chế độ Cảm biến mép bàn / rơi vực (hướng xuống):
+            // Bình thường phải có mặt phẳng sàn (0 < distance <= edge_mm).
+            // Nguy hiểm khi không có mặt sàn (mép vực hoặc xe bị nhấc lên).
+            const bool floor_detected = (error == ESP_OK && reading.valid && reading.distance_mm > 0 &&
+                                         reading.distance_mm <= edge_mm);
+            is_danger = !floor_detected;
+        }
+
+        if (!is_danger) {
+            unsafe_samples = 0;
+            if (cliff_detected_.exchange(false)) {
+                if (mode == Mode::kObstacleForward) {
+                    ESP_LOGI(TAG, "Obstacle cleared: path ahead is open (%d mm)", reading.distance_mm);
+                } else {
+                    ESP_LOGI(TAG, "Floor normal: %u mm away", reading.distance_mm);
+                }
+            }
+        } else {
+            unsafe_samples = std::min<uint8_t>(unsafe_samples + 1, CLIFF_CONFIRM_SAMPLES);
+            if (unsafe_samples >= CLIFF_CONFIRM_SAMPLES && !cliff_detected_.exchange(true)) {
+                if (mode == Mode::kObstacleForward) {
+                    ESP_LOGW(TAG, "Obstacle detected ahead: %u mm (threshold %d mm)",
+                             reading.distance_mm, edge_mm);
+                } else {
+                    if (reading.valid && reading.distance_mm > 0) {
+                        ESP_LOGW(TAG, "Cliff detected: floor is %u mm away", reading.distance_mm);
+                    } else {
+                        ESP_LOGW(TAG, "Cliff detected: no valid floor return");
+                    }
+                }
+                if (cliff_callback_ != nullptr) {
+                    cliff_callback_(callback_context_);
+                }
+            }
+        }
+        vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(DISTANCE_SENSOR_PERIOD_MS));
+    }
+}
+
+CliffSensor::Status CliffSensor::GetStatus() const {
+    return Status{
+        .available = sensor_ != nullptr,
+        .valid = distance_valid_.load(),
+        .distance_mm = distance_mm_.load(),
+        .cliff_detected = IsCliffDetected(),
+        .edge_mm = edge_mm_.load(),
+        .mode = mode_.load(),
+    };
+}
+
+bool CliffSensor::IsCliffDetected() const {
+    return sensor_ != nullptr && cliff_detected_.load();
+}
+
+bool CliffSensor::IsFloorSafe() const {
+    if (mode_.load(std::memory_order_relaxed) == Mode::kObstacleForward) {
+        return !IsCliffDetected();
+    }
+    return distance_valid_.load(std::memory_order_relaxed) && !IsCliffDetected();
+}
+
+bool CliffSensor::IsDirectionBlocked(MotorController::Direction direction) const {
+    if (mode_.load(std::memory_order_relaxed) == Mode::kObstacleForward) {
+        // Với cảm biến tránh vật cản phía trước: chỉ hướng tiến thẳng (kForward) bị chặn
+        // Các hướng lùi (kBackward), rẽ trái (kLeft), rẽ phải (kRight) hoàn toàn được phép để né tránh!
+        return IsCliffDetected() && direction == MotorController::Direction::kForward;
+    }
+    return IsCliffDetected() && direction != MotorController::Direction::kBackward;
+}
+
+void CliffSensor::SetEdgeMm(int edge_mm) {
+    edge_mm_.store(std::clamp(edge_mm, 50, 500), std::memory_order_relaxed);
+}
+
+void CliffSensor::SetMode(Mode mode) {
+    mode_.store(mode, std::memory_order_relaxed);
+}
+
+CliffSensor::Mode CliffSensor::GetMode() const {
+    return mode_.load(std::memory_order_relaxed);
+}

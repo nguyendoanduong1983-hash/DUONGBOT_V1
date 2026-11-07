@@ -1,0 +1,254 @@
+#include "robot_settings.h"
+
+#include "config/tuning.h"
+#include "motion/motor_controller.h"
+#include "settings.h"
+
+#include <algorithm>
+
+namespace {
+constexpr int kDefaultMotorSpeedPercent = 70;
+constexpr int kDefaultDriveDurationMs = 250;
+// NVS keys are limited to 15 characters.
+constexpr char kCameraAttentionKey[] = "cam_attention";
+constexpr char kCameraAttentionTimeoutKey[] = "cam_att_to";
+constexpr char kCameraAttentionGainKey[] = "cam_att_gain";
+}  // namespace
+
+int RobotSettings::GetSpeakerVolume() const {
+    Settings settings("audio", false);
+    return std::clamp(static_cast<int>(settings.GetInt("output_volume", 70)), 0, 100);
+}
+
+bool RobotSettings::GetMicrophoneMuted() const {
+    Settings settings("audio", false);
+    return settings.GetBool("input_muted", false);
+}
+
+void RobotSettings::SetMicrophoneMuted(bool muted) const {
+    Settings settings("audio", true);
+    settings.SetBool("input_muted", muted);
+}
+
+bool RobotSettings::GetAmbientSoundEnabled() const {
+    Settings settings("desk_robot", false);
+    return settings.GetBool("ambient_sound", false);
+}
+
+void RobotSettings::SetAmbientSoundEnabled(bool enabled) const {
+    Settings settings("desk_robot", true);
+    settings.SetBool("ambient_sound", enabled);
+}
+
+VoiceInputConfig RobotSettings::GetVoiceInputConfig() const {
+    Settings settings("audio", false);
+    VoiceInputConfig config;
+    config.profile =
+        ParseVoiceInputProfile(settings.GetString("voice_profile", "balanced"));
+    config.capture_trim_db =
+        std::clamp(static_cast<int>(settings.GetInt("capture_trim_db", 0)), -24, 0);
+    config.voice_gain_db =
+        std::clamp(static_cast<int>(settings.GetInt("voice_gain_db", 0)), -12, 12);
+    config.ns_requested = settings.GetBool("ns_enabled", true);
+    config.agc_requested = settings.GetBool("agc_enabled", false);
+    return config;
+}
+
+void RobotSettings::SetVoiceInputConfig(const VoiceInputConfig& requested) const {
+    Settings settings("audio", true);
+    settings.SetString("voice_profile", VoiceInputProfileName(requested.profile));
+    settings.SetInt("capture_trim_db", std::clamp(requested.capture_trim_db, -24, 0));
+    settings.SetInt("voice_gain_db", std::clamp(requested.voice_gain_db, -12, 12));
+    settings.SetBool("ns_enabled", requested.ns_requested);
+    settings.SetBool("agc_enabled", requested.agc_requested);
+}
+
+bool RobotSettings::GetDisplayFlipped() const {
+    Settings settings("desk_robot", false);
+    return settings.GetBool("display_flip", false);
+}
+
+void RobotSettings::SetDisplayFlipped(bool flipped) const {
+    Settings settings("desk_robot", true);
+    settings.SetBool("display_flip", flipped);
+}
+
+int RobotSettings::GetCliffEdgeMm() const {
+    Settings settings("desk_robot", false);
+    return std::clamp(static_cast<int>(settings.GetInt("cliff_edge_mm", CLIFF_EDGE_DISTANCE_MM)),
+                      50, 500);
+}
+
+void RobotSettings::SetCliffEdgeMm(int edge_mm) const {
+    Settings settings("desk_robot", true);
+    settings.SetInt("cliff_edge_mm", std::clamp(edge_mm, 50, 500));
+}
+
+bool RobotSettings::GetObstacleAvoidanceMode() const {
+    Settings settings("desk_robot", false);
+    return settings.GetBool("obs_avoid_mode", true);
+}
+
+void RobotSettings::SetObstacleAvoidanceMode(bool enabled) const {
+    Settings settings("desk_robot", true);
+    settings.SetBool("obs_avoid_mode", enabled);
+}
+
+bool RobotSettings::GetMotionEmotionsEnabled() const {
+    Settings settings("desk_robot", false);
+    return settings.GetBool("motion_emotions", true);
+}
+
+void RobotSettings::SetMotionEmotionsEnabled(bool enabled) const {
+    Settings settings("desk_robot", true);
+    settings.SetBool("motion_emotions", enabled);
+}
+
+int RobotSettings::GetStatusLightBrightness() const {
+    Settings settings("desk_robot", false);
+    return std::clamp(
+        static_cast<int>(settings.GetInt("led_brightness", STATUS_LIGHT_DEFAULT_BRIGHTNESS)), 0,
+        100);
+}
+
+void RobotSettings::SetStatusLightBrightness(int brightness) const {
+    Settings settings("desk_robot", true);
+    settings.SetInt("led_brightness", std::clamp(brightness, 0, 100));
+}
+
+int RobotSettings::GetMotorSpeed() const {
+    Settings settings("desk_robot", false);
+    return std::clamp(static_cast<int>(settings.GetInt("motor_speed", kDefaultMotorSpeedPercent)),
+                      MotorController::kMinSpeedPercent, MotorController::kMaxSpeedPercent);
+}
+
+void RobotSettings::SetMotorSpeed(int speed) const {
+    Settings settings("desk_robot", true);
+    settings.SetInt("motor_speed", std::clamp(speed, MotorController::kMinSpeedPercent,
+                                               MotorController::kMaxSpeedPercent));
+}
+
+int RobotSettings::GetDriveDurationMs() const {
+    Settings settings("desk_robot", false);
+    return std::clamp(static_cast<int>(settings.GetInt("drive_time", kDefaultDriveDurationMs)), 50,
+                      5000);
+}
+
+void RobotSettings::SetDriveDurationMs(int duration_ms) const {
+    Settings settings("desk_robot", true);
+    settings.SetInt("drive_time", std::clamp(duration_ms, 50, 5000));
+}
+
+bool RobotSettings::GetEmotionMovementEnabled() const {
+    Settings settings("desk_robot", false);
+    return settings.GetBool("emotion_move", false);
+}
+
+void RobotSettings::SetEmotionMovementEnabled(bool enabled) const {
+    Settings settings("desk_robot", true);
+    settings.SetBool("emotion_move", enabled);
+}
+
+int RobotSettings::GetManualScreenBrightness() const {
+    Settings settings("display", false);
+    return std::clamp(static_cast<int>(settings.GetInt("brightness", 75)), 10, 100);
+}
+
+bool RobotSettings::GetAutoBrightnessEnabled() const {
+    Settings settings("desk_robot", false);
+    return settings.GetBool("auto_bright", false);
+}
+
+void RobotSettings::SetAutoBrightnessEnabled(bool enabled) const {
+    Settings settings("desk_robot", true);
+    settings.SetBool("auto_bright", enabled);
+}
+
+int RobotSettings::GetAutoBrightnessMinimum() const {
+    Settings settings("desk_robot", false);
+    return std::clamp(static_cast<int>(settings.GetInt("auto_bmin",
+                                                       AUTO_BRIGHTNESS_DEFAULT_MIN_PERCENT)),
+                      10, 100);
+}
+
+void RobotSettings::SetAutoBrightnessMinimum(int brightness) const {
+    Settings settings("desk_robot", true);
+    settings.SetInt("auto_bmin", std::clamp(brightness, 10, 100));
+}
+
+int RobotSettings::GetAutoBrightnessMaximum() const {
+    Settings settings("desk_robot", false);
+    return std::clamp(static_cast<int>(settings.GetInt("auto_bmax",
+                                                       AUTO_BRIGHTNESS_DEFAULT_MAX_PERCENT)),
+                      10, 100);
+}
+
+void RobotSettings::SetAutoBrightnessMaximum(int brightness) const {
+    Settings settings("desk_robot", true);
+    settings.SetInt("auto_bmax", std::clamp(brightness, 10, 100));
+}
+
+bool RobotSettings::GetDeskModeEnabled() const {
+    Settings settings("desk_robot", false);
+    return settings.GetBool("desk_mode", true);
+}
+
+void RobotSettings::SetDeskModeEnabled(bool enabled) const {
+    Settings settings("desk_robot", true);
+    settings.SetBool("desk_mode", enabled);
+}
+
+int RobotSettings::GetDeskModeDelaySeconds() const {
+    Settings settings("desk_robot", false);
+    const int legacy_minutes =
+        std::clamp(static_cast<int>(settings.GetInt("desk_delay", 3)), 1, 10);
+    return std::clamp(
+        static_cast<int>(settings.GetInt("desk_delay_s", legacy_minutes * 60)), 10, 600);
+}
+
+void RobotSettings::SetDeskModeDelaySeconds(int seconds) const {
+    Settings settings("desk_robot", true);
+    settings.SetInt("desk_delay_s", std::clamp(seconds, 10, 600));
+}
+
+bool RobotSettings::GetDeskModeUse24Hour() const {
+    Settings settings("desk_robot", false);
+    return settings.GetBool("desk_24h", true);
+}
+
+void RobotSettings::SetDeskModeUse24Hour(bool use_24_hour) const {
+    Settings settings("desk_robot", true);
+    settings.SetBool("desk_24h", use_24_hour);
+}
+
+bool RobotSettings::GetCameraAttentionEnabled() const {
+    Settings settings("desk_robot", false);
+    return settings.GetBool(kCameraAttentionKey, false);
+}
+
+void RobotSettings::SetCameraAttentionEnabled(bool enabled) const {
+    Settings settings("desk_robot", true);
+    settings.SetBool(kCameraAttentionKey, enabled);
+}
+
+int RobotSettings::GetCameraAttentionMotionLossTimeoutMs() const {
+    Settings settings("desk_robot", false);
+    return std::clamp(
+        static_cast<int>(settings.GetInt(kCameraAttentionTimeoutKey, 750)), 0, 3000);
+}
+
+void RobotSettings::SetCameraAttentionMotionLossTimeoutMs(int timeout_ms) const {
+    Settings settings("desk_robot", true);
+    settings.SetInt(kCameraAttentionTimeoutKey, std::clamp(timeout_ms, 0, 3000));
+}
+
+int RobotSettings::GetCameraAttentionTrackingGainPercent() const {
+    Settings settings("desk_robot", false);
+    return std::clamp(
+        static_cast<int>(settings.GetInt(kCameraAttentionGainKey, 180)), 50, 300);
+}
+
+void RobotSettings::SetCameraAttentionTrackingGainPercent(int gain_percent) const {
+    Settings settings("desk_robot", true);
+    settings.SetInt(kCameraAttentionGainKey, std::clamp(gain_percent, 50, 300));
+}
