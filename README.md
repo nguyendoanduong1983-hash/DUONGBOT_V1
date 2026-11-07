@@ -19,13 +19,13 @@ Purpose-built ESP32-S3 firmware for one expressive, camera-equipped desktop robo
 
 ---
 
-This is a focused fork of [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32), trimmed to a single physical target:
+This project is built and developed based on [`hudrucan/xiaozhi-desk-robot`](https://github.com/hudrucan/xiaozhi-desk-robot) and [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32), customized and trimmed to a single physical target:
 
 ```text
 esp32-s3-n16r8-cam · ESP32-S3 · 16 MB flash · 8 MB octal PSRAM
 ```
 
-It keeps Xiaozhi's reusable application, audio, protocol and MCP foundations, then adds the hardware control, safety, face, sensors and local dashboard for DuongBot. It is **not** the upstream multi-board firmware tree.
+It keeps Xiaozhi's reusable application, audio, protocol and MCP foundations from [`hudrucan/xiaozhi-desk-robot`](https://github.com/hudrucan/xiaozhi-desk-robot), then enhances and adds customized hardware control, safety interlock, face animations, Vietnamese voice wake word, online YouTube/Radio streaming, sensors and local dashboard for DuongBot. It is **not** the upstream multi-board firmware tree.
 
 ## Highlights
 
@@ -202,6 +202,6 @@ The firmware can also use a compatible Xiaozhi deployment supplied through its b
 
 ## Upstream and license
 
-Derived from [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32). Keep the applicable upstream attribution and license notices when redistributing derived work.
+Derived from [`hudrucan/xiaozhi-desk-robot`](https://github.com/hudrucan/xiaozhi-desk-robot) and [`78/xiaozhi-esp32`](https://github.com/78/xiaozhi-esp32). Special thanks to the original authors and open-source contributors. Keep the applicable upstream attribution and license notices when redistributing derived work.
 
 Released under the [MIT License](LICENSE).
